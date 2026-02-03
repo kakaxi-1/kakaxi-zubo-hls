@@ -1,8 +1,25 @@
+# kakaxi-zubo-hls
+
+A lightweight IPTV relay and management server.
+
+---
+
 ## License
-This project is released for non-commercial use only.
-Commercial use is strictly prohibited.
+
+This project is released **for non-commercial use only**.
+
+Commercial use is strictly prohibited, including but not limited to:
+- providing paid IPTV services
+- selling access, subscriptions, or setup services
+- using this project as part of any commercial offering
+
+Any commercial use requires prior written permission from the author.
+
+---
 
 ## Docker Compose
+
+```yaml
 services:
   iptv-server:
     image: kakaxi088/zubo:latest
@@ -18,6 +35,19 @@ services:
       - CONFIG_FILE=/app/config/iptv_config.json
       - TZ=Asia/Shanghai
 
-http://localhost:5020
+⸻
 
+Access
+
+After the service is started, you can access:
+	•	Web interface:
+http://localhost:5020
+	•	IPTV playlist:
 http://localhost:5020/zubo.txt
+
+⸻
+
+Notes
+
+This project is intended for personal learning and non-commercial use only.
+Please ensure your usage complies with local laws and regulations.
