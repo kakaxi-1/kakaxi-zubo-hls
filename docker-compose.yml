@@ -1,0 +1,26 @@
+services:
+  iptv-server:
+    build: .
+    container_name: zubo
+    restart: unless-stopped
+    ports:
+      - "5020:5020"
+    volumes:
+      - ./config:/app/config
+      - /etc/localtime:/etc/localtime:ro
+    environment:
+      - PORT=5020
+      - BASE_DIR=/app
+      - CONFIG_FILE=/app/config/iptv_config.json
+      - IPTV_FILE=/app/IPTV.txt
+      - HLS_ROOT=/app/hls
+      - LOG_DIR=/app/logs
+      - IP_DIR=/app/ip
+      - RTP_DIR=/app/rtp
+      - WEB_DIR=/app/web
+      - TZ=Asia/Shanghai
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5020/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
