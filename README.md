@@ -19,4 +19,5 @@ services:
       - TZ=Asia/Shanghai
 
 http://localhost:5020
+
 http://localhost:5020/zubo.txt
