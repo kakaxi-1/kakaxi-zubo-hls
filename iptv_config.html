@@ -1,0 +1,2980 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IPTV频道配置 | kakaxi</title>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=-apple-system,BlinkMacSystemFont,San+Francisco,Helvetica+Neue,Helvetica,Arial,sans-serif">
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
+    <style>
+        /* 保持原有的CSS样式不变 */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: -apple-system, BlinkMacSystemFont, "San Francisco", "Helvetica Neue", Helvetica, Arial, sans-serif;
+            -webkit-tap-highlight-color: rgba(0,0,0,0);
+        }
+
+        body {
+            background-color: #f5f5f7;
+            padding: 20px;
+            color: #1d1d1f;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .panel-header {
+            background-color: #ffffff;
+            border-radius: 12px;
+            padding: 16px 20px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+            text-align: center;
+            position: relative;
+        }
+        .panel-title {
+            font-size: 20px;
+            font-weight: 600;
+            color: #1d1d1f;
+        }
+
+        /* 退出按钮样式 */
+        .logout-btn {
+            position: absolute;
+            right: 20px;
+            top: 50%;
+            transform: translateY(-50%);
+            padding: 8px 16px;
+            background: #ff3b30;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: background-color 0.2s;
+            display: none;
+        }
+
+        .logout-btn:hover {
+            background: #d70015;
+        }
+
+        .tab-group {
+            display: flex;
+            gap: 8px;
+            background: #fff;
+            padding: 8px;
+            border-radius: 12px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+            flex-wrap: wrap;
+        }
+        .tab-btn {
+            flex: 1;
+            min-width: 100px;
+            padding: 12px;
+            border: none;
+            border-radius: 8px;
+            background: #f5f5f7;
+            color: #86868b;
+            font-size: 16px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .tab-btn.active {
+            background: #007aff;
+            color: #fff;
+        }
+
+        /* 分类配置样式 */
+        #categories-container {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            cursor: grab;
+        }
+        #categories-container:active {
+            cursor: grabbing;
+        }
+
+        .category-card {
+            background: #ffffff;
+            border-radius: 16px;
+            padding: 18px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+            border: 1px solid transparent;
+            transition: border 0.2s;
+        }
+        .category-card.active {
+            border: 2px solid #007aff;
+        }
+        .category-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 12px;
+        }
+        .category-name-input {
+            width: 220px;
+            padding: 10px 14px;
+            border: 1px solid #e5e5e7;
+            border-radius: 10px;
+            font-size: 16px;
+            color: #1d1d1f;
+            background-color: #f9f9fb;
+            outline: none;
+            cursor: text;
+        }
+        .category-name-input:focus {
+            border-color: #007aff;
+        }
+        .btn-delete {
+            padding: 8px 12px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 500;
+            border: none;
+            background-color: #ff3b30;
+            color: #ffffff;
+            cursor: pointer;
+        }
+
+        .channel-tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            cursor: grab;
+        }
+        .channel-tags:active {
+            cursor: grabbing;
+        }
+        .channel-tag {
+            background-color: #e8f0fe;
+            color: #007aff;
+            padding: 8px 14px;
+            border-radius: 20px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+            cursor: move;
+        }
+        .tag-close {
+            cursor: pointer;
+            font-size: 16px;
+            line-height: 1;
+        }
+        .tag-close:hover {
+            color: #ff3b30;
+        }
+
+        .global-channel-library {
+            background: #ffffff;
+            border-radius: 16px;
+            padding: 12px 15px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.06)
+        }
+        .library-title {
+            font-size: 14px;
+            color: #86868b;
+            margin-bottom: 8px;
+            font-weight: 400;
+        }
+        .preset-channels {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 3px;
+        }
+        .preset-channel {
+            background-color: #f5f5f7;
+            color: #1d1d1f;
+            padding: 6px 10px;
+            border-radius: 6px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+            line-height: 1.2;
+            min-width: 60px;
+            text-align: center;
+        }
+        .preset-channel:hover {
+            background-color: #e8f0fe;
+            color: #007aff;
+            transform: translateY(-1px);
+        }
+
+        .btn-group {
+            display: flex;
+            gap: 12px;
+        }
+        .btn-add-category {
+            flex: 1;
+            padding: 14px;
+            border-radius: 12px;
+            font-size: 16px;
+            font-weight: 500;
+            border: 1px solid #007aff;
+            background-color: #ffffff;
+            color: #007aff;
+            cursor: pointer;
+        }
+        .btn-save {
+            flex: 2;
+            padding: 14px;
+            border-radius: 12px;
+            font-size: 16px;
+            font-weight: 500;
+            border: none;
+            background-color: #007aff;
+            color: #ffffff;
+            cursor: pointer;
+        }
+        .btn-save:disabled {
+            background-color: #86868b;
+            cursor: not-allowed;
+        }
+
+        /* 映射配置样式 */
+        #mapping-panel {
+            display: none;
+        }
+        .mapping-card {
+            background: #fff;
+            border-radius: 16px;
+            padding: 18px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+            margin-bottom: 12px;
+        }
+        .mapping-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 12px;
+        }
+        .standard-name-input {
+            width: 220px;
+            padding: 10px 14px;
+            border: 1px solid #e5e5e7;
+            border-radius: 10px;
+            font-size: 16px;
+            color: #1d1d1f;
+            background-color: #f9f9fb;
+            outline: none;
+            cursor: text;
+        }
+        .standard-name-input:focus {
+            border-color: #007aff;
+        }
+        .alias-tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+        .alias-tag {
+            background-color: #f0f8ff;
+            color: #0066cc;
+            padding: 8px 14px;
+            border-radius: 20px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+        }
+        .alias-input-container {
+            display: flex;
+            gap: 8px;
+        }
+        .alias-input {
+            flex: 1;
+            padding: 10px 14px;
+            border: 1px solid #e5e5e7;
+            border-radius: 10px;
+            font-size: 16px;
+            outline: none;
+        }
+        .add-alias-btn {
+            padding: 0 16px;
+            border-radius: 10px;
+            border: none;
+            background: #007aff;
+            color: #fff;
+            font-size: 16px;
+            cursor: pointer;
+        }
+        .btn-add-mapping {
+            flex: 1;
+            padding: 14px;
+            border-radius: 12px;
+            font-size: 16px;
+            font-weight: 500;
+            border: 1px solid #007aff;
+            background-color: #ffffff;
+            color: #007aff;
+            cursor: pointer;
+        }
+
+        /* 定时更新配置样式 */
+        #schedule-panel {
+            display: none;
+        }
+        .schedule-item {
+            background: #fff;
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+            border: 1px solid #e5e5e7;
+        }
+
+        .schedule-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 12px;
+        }
+
+        .schedule-time-input {
+            width: 180px;
+            padding: 10px 14px;
+            border: 1px solid #e5e5e7;
+            border-radius: 10px;
+            font-size: 16px;
+            color: #1d1d1f;
+            background-color: #f9f9fb;
+            outline: none;
+            text-align: center;
+        }
+
+        .schedule-time-input:focus {
+            border-color: #007aff;
+        }
+
+        .schedule-enabled {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .schedule-switch {
+            position: relative;
+            display: inline-block;
+            width: 50px;
+            height: 26px;
+        }
+
+        .schedule-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .schedule-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            transition: .4s;
+            border-radius: 34px;
+        }
+
+        .schedule-slider:before {
+            position: absolute;
+            content: "";
+            height: 18px;
+            width: 18px;
+            left: 4px;
+            bottom: 4px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+
+        input:checked + .schedule-slider {
+            background-color: #34c759;
+        }
+
+        input:checked + .schedule-slider:before {
+            transform: translateX(24px);
+        }
+
+        .schedule-label {
+            font-size: 14px;
+            color: #1d1d1f;
+            font-weight: 500;
+        }
+
+        .schedule-footer {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-top: 12px;
+            padding-top: 12px;
+            border-top: 1px solid #f0f0f0;
+        }
+
+        .schedule-description {
+            font-size: 13px;
+            color: #86868b;
+            font-style: italic;
+        }
+
+        .empty-schedule {
+            text-align: center;
+            padding: 40px 20px;
+            color: #86868b;
+            font-size: 16px;
+            background: #f9f9fb;
+            border-radius: 12px;
+            margin-bottom: 20px;
+        }
+
+        .empty-schedule p {
+            margin-bottom: 15px;
+        }
+
+        .schedule-warning {
+            color: #ff9500;
+            font-size: 13px;
+            margin-top: 10px;
+            padding: 8px 12px;
+            background-color: #fff8e6;
+            border-radius: 6px;
+            border-left: 3px solid #ff9500;
+        }
+
+        /* 添加映射弹窗样式 */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            overflow: auto;
+            background-color: rgba(0,0,0,0.4);
+        }
+        .modal-content {
+            background-color: #fefefe;
+            margin: 15% auto;
+            padding: 20px;
+            border: 1px solid #888;
+            border-radius: 12px;
+            width: 80%;
+            max-width: 400px;
+        }
+        .close {
+            color: #aaa;
+            float: right;
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+        .close:hover,
+        .close:focus {
+            color: black;
+            text-decoration: none;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 500;
+        }
+        .form-group input, .form-group select {
+            width: 100%;
+            padding: 10px 14px;
+            border: 1px solid #e5e5e7;
+            border-radius: 10px;
+            font-size: 16px;
+            color: #1d1d1f;
+            background-color: #f9f9fb;
+            outline: none;
+        }
+        .modal-content button {
+            width: 100%;
+            padding: 12px;
+            border-radius: 8px;
+            border: none;
+            background: #007aff;
+            color: #fff;
+            font-size: 16px;
+            cursor: pointer;
+        }
+
+        /* 基础配置面板样式（IP/RTP配置） */
+        #basic-config-panel {
+            display: none;
+        }
+        .settings-config-card {
+            background: #fff;
+            border-radius: 16px;
+            padding: 18px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+            margin-bottom: 12px;
+        }
+
+        /* 第三方URL样式 */
+        .third-party-url-wrap {
+            margin: 20px 0;
+            padding: 15px;
+            background-color: #f9f9fb;
+            border-radius: 10px;
+        }
+        .third-party-url-title {
+            font-size: 16px;
+            font-weight: 500;
+            margin-bottom: 10px;
+            color: #1d1d1f;
+        }
+        .third-party-url-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin: 10px 0;
+        }
+        .url-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px;
+            background: #fff;
+            border-radius: 8px;
+        }
+        .url-input {
+            flex: 3;
+            padding: 8px 12px;
+            border: 1px solid #e5e5e7;
+            border-radius: 6px;
+            font-size: 14px;
+            outline: none;
+        }
+        .url-input:focus {
+            border-color: #007aff;
+        }
+        .filename-input {
+            flex: 1;
+            padding: 8px 12px;
+            border: 1px solid #e5e5e7;
+            border-radius: 6px;
+            font-size: 14px;
+            outline: none;
+        }
+        .delete-url-btn {
+            padding: 8px 12px;
+            border: none;
+            border-radius: 6px;
+            background: #ff3b30;
+            color: white;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        .add-url-btn {
+            padding: 10px 16px;
+            border: none;
+            border-radius: 8px;
+            background: #007aff;
+            color: white;
+            cursor: pointer;
+            font-size: 14px;
+            margin-bottom: 10px;
+        }
+
+        /* IP/RTP左右布局容器 */
+        .ip-rtp-container {
+            display: flex;
+            gap: 16px;
+            margin-bottom: 12px;
+        }
+        .config-card {
+            flex: 1;
+            background: #fff;
+            border-radius: 16px;
+            padding: 18px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+        }
+        .file-select {
+            margin-bottom: 10px;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        .file-select label {
+            font-weight: 500;
+            color: #1d1d1f;
+        }
+        .file-select select {
+            padding: 6px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            flex: 1;
+            max-width: 300px;
+        }
+        .file-textarea {
+            width: 100%;
+            height: 300px;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            resize: vertical;
+            font-family: monospace;
+        }
+        .file-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+        }
+        .new-file-btn {
+            padding: 8px 16px;
+            border-radius: 8px;
+            border: none;
+            background-color: #007bff;
+            color: white;
+            cursor: pointer;
+            flex: 1;
+        }
+        .delete-file-btn {
+            padding: 8px 16px;
+            border-radius: 8px;
+            border: none;
+            background-color: #dc3545;
+            color: white;
+            cursor: pointer;
+            flex: 1;
+        }
+
+        /* 基础配置底部按钮组 */
+        .basic-config-bottom-btns {
+            display: flex;
+            gap: 12px;
+            margin-top: 12px;
+        }
+        .btn-save-basic {
+            flex: 2;
+            padding: 14px;
+            border-radius: 12px;
+            font-size: 16px;
+            font-weight: 500;
+            border: none;
+            background-color: #007aff;
+            color: #ffffff;
+            cursor: pointer;
+        }
+        .btn-save-basic:disabled {
+            background-color: #86868b;
+            cursor: not-allowed;
+        }
+        .btn-update-iptv {
+            flex: 1;
+            padding: 14px;
+            border-radius: 12页;
+            font-size: 16px;
+            font-weight: 500;
+            border: none;
+            background-color: #34c759;
+            color: #ffffff;
+            cursor: pointer;
+        }
+        .btn-update-iptv:disabled {
+            background-color: #86868b;
+            cursor: not-allowed;
+        }
+
+        /* 新建文件弹窗样式 */
+        .file-modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            overflow: auto;
+            background-color: rgba(0,0,0,0.4);
+        }
+        .file-modal-content {
+            background-color: #fefefe;
+            margin: 15% auto;
+            padding: 20px;
+            border: 1px solid #888;
+            border-radius: 12px;
+            width: 80%;
+            max-width: 400px;
+        }
+
+        /* 加载状态样式 */
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255,255,255,.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 1s ease-in-out infinite;
+            margin-right: 8px;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* 响应式适配 */
+        @media (max-width: 768px) {
+            .btn-group {
+                flex-direction: column;
+            }
+            .file-select {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+            select {
+                max-width: 100%;
+                width: 100%;
+            }
+            .file-textarea {
+                height: 200px;
+            }
+            .file-actions {
+                flex-direction: column;
+            }
+            .url-item {
+                flex-direction: column;
+            }
+            .url-input, .filename-input {
+                width: 100%;
+                flex: none;
+            }
+            .ip-rtp-container {
+                flex-direction: column;
+            }
+            .basic-config-bottom-btns {
+                flex-direction: column;
+            }
+            
+            /* 移动端调整面板头部 */
+            .panel-header {
+                padding: 16px 20px;
+                text-align: center;
+                position: relative;
+                min-height: 60px; /* 确保有足够的高度容纳按钮 */
+            }
+            
+            .panel-title {
+                margin-bottom: 10px;
+                padding-right: 0;
+                font-size: 18px;
+            }
+            
+            .logout-btn {
+                position: static; /* 移除绝对定位 */
+                width: auto;
+                margin-top: 10px;
+                transform: none;
+                display: inline-block;
+            }
+        }
+
+        /* 登录相关样式 */
+        .login-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.8);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 9999;
+        }
+
+        .login-container {
+            background: white;
+            padding: 40px;
+            border-radius: 16px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+            width: 90%;
+            max-width: 400px;
+        }
+
+        .login-title {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .login-title h1 {
+            font-size: 24px;
+            color: #1d1d1f;
+            margin-bottom: 8px;
+        }
+
+        .login-title p {
+            color: #86868b;
+            font-size: 14px;
+        }
+
+        .login-input {
+            width: 100%;
+            padding: 14px;
+            margin-bottom: 20px;
+            border: 1px solid #e5e5e7;
+            border-radius: 10px;
+            font-size: 16px;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+
+        .login-input:focus {
+            border-color: #007aff;
+        }
+
+        .login-button {
+            width: 100%;
+            padding: 14px;
+            background: #007aff;
+            color: white;
+            border: none;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+
+        .login-button:hover {
+            background: #0056cc;
+        }
+
+        .login-error {
+            color: #ff3b30;
+            font-size: 14px;
+            margin-bottom: 15px;
+            text-align: center;
+            display: none;
+        }
+
+        .change-password-link {
+            text-align: center;
+            margin-top: 20px;
+        }
+
+        .change-password-link a {
+            color: #007aff;
+            text-decoration: none;
+            font-size: 14px;
+        }
+
+        .change-password-link a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <!-- 登录模态框 -->
+    <div id="loginModal" class="modal" style="display: block;">
+        <div class="modal-content" style="max-width: 450px;">
+            <div style="text-align: center; margin-bottom: 25px;">
+                <h2 style="color: #1d1d1f; margin-bottom: 8px;">IPTV配置面板</h2>
+                <p style="color: #86868b; margin-top: 0; font-size: 14px;">请输入访问密码</p>
+            </div>
+            
+            <!-- 登录表单 -->
+            <div id="loginForm">
+                <div class="form-group">
+                    <label for="password">密码：</label>
+                    <input type="password" id="password" placeholder="默认密码：admin" autocomplete="current-password">
+                </div>
+                <div id="loginError" style="color: #ff3b30; margin-bottom: 15px; display: none;">
+                    密码错误，请重试
+                </div>
+                <button onclick="handleLogin()" style="width: 100%; padding: 12px; background: #007aff; color: white; border: none; border-radius: 8px; font-size: 16px; cursor: pointer; margin-bottom: 15px;">
+                    登录
+                </button>
+                <div style="text-align: center;">
+                    <a href="javascript:void(0)" onclick="showChangePasswordForm()" style="color: #007aff; text-decoration: none; font-size: 14px;">
+                        修改密码
+                    </a>
+                </div>
+            </div>
+            
+            <!-- 修改密码表单 -->
+            <div id="changePasswordForm" style="display: none;">
+                <div style="margin-bottom: 20px;">
+                    <a href="javascript:void(0)" onclick="showLoginForm()" style="color: #007aff; text-decoration: none; font-size: 14px; display: inline-flex; align-items: center;">
+                        <span style="font-size: 20px; margin-right: 5px;">←</span> 返回登录
+                    </a>
+                </div>
+                
+                <div class="form-group">
+                    <label for="oldPassword">原密码：</label>
+                    <input type="password" id="oldPassword" placeholder="请输入原密码" autocomplete="current-password">
+                </div>
+                <div class="form-group">
+                    <label for="newPassword">新密码：</label>
+                    <input type="password" id="newPassword" placeholder="请输入新密码（至少4位）" autocomplete="new-password">
+                </div>
+                <div class="form-group">
+                    <label for="confirmPassword">确认新密码：</label>
+                    <input type="password" id="confirmPassword" placeholder="请再次输入新密码" autocomplete="new-password">
+                </div>
+                <div id="passwordError" style="color: #ff3b30; margin-bottom: 15px; display: none;"></div>
+                <button onclick="handleChangePassword()" style="width: 100%; padding: 12px; background: #34c759; color: white; border: none; border-radius: 8px; font-size: 16px; cursor: pointer;">
+                    确认修改
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 主内容容器（登录后显示） -->
+    <div id="mainContainer" style="display: none;">
+        <div class="container">
+            <div class="panel-header">
+                <h1 class="panel-title">IPTV频道配置 | kakaxi</h1>
+                <button id="logoutBtn" class="logout-btn" onclick="logout()">退出登录</button>
+            </div>
+
+            <div class="tab-group">
+                <button class="tab-btn active" onclick="switchTab('category')">分类配置</button>
+                <button class="tab-btn" onclick="switchTab('mapping')">映射配置</button>
+                <button class="tab-btn" onclick="switchTab('basic-config')">基础配置</button>
+                <button class="tab-btn" onclick="switchTab('schedule')">定时更新配置</button>
+            </div>
+
+            <!-- 分类配置面板 -->
+            <div id="category-panel">
+                <div id="categories-container">
+                    <!-- 分类会通过JS初始化渲染 -->
+                </div>
+
+                <div class="global-channel-library">
+                    <div class="library-title">频道库（单点添加）</div>
+                    <div class="preset-channels" id="preset-channels-container">
+                        <!-- 频道库会通过JS初始化渲染 -->
+                    </div>
+                </div>
+
+                <div class="btn-group">
+                    <button id="add-category" class="btn-add-category">添加分类</button>
+                    <button id="save-all" class="btn-save">保存IPTV频道配置</button>
+                </div>
+            </div>
+
+            <!-- 映射配置面板 -->
+            <div id="mapping-panel">
+                <div id="mapping-container"></div>
+
+                <div class="btn-group">
+                    <button id="add-mapping" class="btn-add-mapping" onclick="openAddMappingModal()">添加映射规则</button>
+                    <button id="save-mapping" class="btn-save">保存映射配置</button>
+                </div>
+            </div>
+
+            <!-- 基础配置面板 -->
+            <div id="basic-config-panel">
+                <!-- 第三方IPTV源配置卡片 -->
+                <div class="settings-config-card">
+                    <h2 style="margin-bottom: 12px; color: #1d1d1f;">第三方IPTV源配置</h2>
+                    <div class="third-party-url-wrap">
+                        <div class="third-party-url-title">第三方IPTV源配置</div>
+                        <button class="add-url-btn" onclick="addNewUrlItem()">+ 添加新的URL</button>
+                        <div class="third-party-url-list" id="third-party-url-list">
+                            <!-- URL列表会通过JS渲染 -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- IP和RTP配置文件管理（左右布局） -->
+                <div class="ip-rtp-container">
+                    <!-- IP配置卡片 -->
+                    <div class="config-card">
+                        <h2 style="margin-bottom: 12px; color: #1d1d1f;">IP配置文件管理</h2>
+                        <div class="file-select">
+                            <label>选择文件：</label>
+                            <select id="ipFileSelect"></select>
+                            <button id="refreshIpBtn">刷新</button>
+                        </div>
+                        <textarea id="ipContent" class="file-textarea" placeholder="文件内容（格式：IP:端口，每行一个）..."></textarea>
+                        <div class="file-actions">
+                            <button id="newIpBtn" class="new-file-btn">新建IP文件</button>
+                            <button id="deleteIpBtn" class="delete-file-btn">删除IP文件</button>
+                        </div>
+                    </div>
+
+                    <!-- RTP配置卡片 -->
+                    <div class="config-card">
+                        <h2 style="margin-bottom: 12px; color: #1d1d1f;">RTP配置文件管理</h2>
+                        <div class="file-select">
+                            <label>选择文件：</label>
+                            <select id="rtpFileSelect"></select>
+                            <button id="refreshRtpBtn">刷新</button>
+                        </div>
+                        <textarea id="rtpContent" class="file-textarea" placeholder="文件内容（格式：频道名,RTP/UDP地址）..."></textarea>
+                        <div class="file-actions">
+                            <button id="newRtpBtn" class="new-file-btn">新建RTP文件</button>
+                            <button id="deleteRtpBtn" class="delete-file-btn">删除RTP文件</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 基础配置底部按钮组 -->
+                <div class="basic-config-bottom-btns">
+                    <button id="save-basic-config" class="btn-save-basic">保存所有基础配置</button>
+                    <button id="update-iptv-btn" class="btn-update-iptv" onclick="updateIPTVChannels()">手动更新IPTV</button>
+                </div>
+            </div>
+
+            <!-- 定时更新配置面板 -->
+            <div id="schedule-panel">
+                <div class="settings-config-card">
+                    <h2 style="margin-bottom: 12px; color: #1d1d1f;">定时更新任务配置</h2>
+                    <div style="margin-bottom: 20px; color: #86868b; font-size: 14px;">
+                        设置IPTV频道自动更新的时间计划，支持24小时制。每个任务会在指定时间自动运行更新。
+                    </div>
+                    
+                    <div class="schedule-list" id="schedule-list">
+                        <!-- 定时任务会通过JS渲染 -->
+                    </div>
+                    
+                    <div class="btn-group" style="margin-top: 20px;">
+                        <button id="add-schedule-btn" class="btn-add-category">+ 添加定时任务</button>
+                        <button id="save-schedule-btn" class="btn-save">保存定时配置</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 添加映射规则弹窗 -->
+        <div id="addMappingModal" class="modal">
+            <div class="modal-content">
+                <span class="close" onclick="closeAddMappingModal(event)">&times;</span>
+                <h3 style="margin-bottom: 15px; text-align: center;">添加映射规则</h3>
+                <div class="form-group">
+                    <label>频道名称（主名称）：</label>
+                    <input type="text" id="newMappingName" placeholder="例如：湖北经济" required>
+                </div>
+                <div class="form-group">
+                    <label>别名（多个用英文逗号分隔）：</label>
+                    <input type="text" id="newMappingAliases" placeholder="例如：湖北经济频道,湖北经济HD" required>
+                </div>
+                <button onclick="saveNewMapping(event)">保存</button>
+            </div>
+        </div>
+
+        <!-- 新建文件弹窗 -->
+        <div id="newFileModal" class="file-modal">
+            <div class="file-modal-content">
+                <span class="close" onclick="closeNewFileModal(event)">&times;</span>
+                <h3 style="margin-bottom: 15px; text-align: center;" id="newFileModalTitle">新建文件</h3>
+                <div class="form-group">
+                    <label>文件名（自动添加.txt后缀）：</label>
+                    <input type="text" id="newFileName" placeholder="例如：ip_list" required>
+                </div>
+                <button onclick="saveNewFile(event)">创建文件</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ===================== 登录状态管理 =====================
+        let isAuthenticated = false;
+        let authToken = null;
+        
+        // 全局变量
+        let categoryData = {};
+        let mappingData = {};
+        let thirdPartyUrls = {};
+        let ALL_CHANNELS = [];
+        let activeCategoryName = null;
+        let mappingChanged = false;
+        let currentNewFileType = '';
+        let isUpdatingIPTV = false;
+        let scheduleData = [];
+        let scheduleChanged = false;
+
+        // 自定义 Map 类来保持顺序
+        class OrderedMap {
+            constructor(data = {}) {
+                this._keys = [];
+                this._values = {};
+                this._initialize(data);
+            }
+
+            _initialize(data) {
+                console.log('OrderedMap._initialize 输入数据:', data);
+                
+                this._keys = [];
+                this._values = {};
+                
+                // 情况1：数据是数组形式 [[key1, value1], [key2, value2]]
+                if (Array.isArray(data)) {
+                    console.log('处理数组格式');
+                    data.forEach((item) => {
+                        // item 可能是数组 [key, value] 或对象 {key: value}
+                        if (Array.isArray(item) && item.length >= 2) {
+                            const [key, value] = item;
+                            if (!this._values.hasOwnProperty(key)) {
+                                this._keys.push(key);
+                            }
+                            this._values[key] = value;
+                        }
+                    });
+                }
+                // 情况2：数据有 _order 属性
+                else if (data && typeof data === 'object' && Array.isArray(data._order)) {
+                    console.log('处理有_order字段的数据:', data._order);
+                    data._order.forEach(key => {
+                        if (data.hasOwnProperty(key) && key !== "_order") {
+                            this._keys.push(key);
+                            this._values[key] = data[key];
+                        }
+                    });
+                    // 添加 _order 中没有的其他键
+                    Object.keys(data).forEach(key => {
+                        if (key !== "_order" && !this._values.hasOwnProperty(key)) {
+                            this._keys.push(key);
+                            this._values[key] = data[key];
+                        }
+                    });
+                }
+                // 情况3：普通对象，使用 Object.keys 的顺序
+                else if (data && typeof data === 'object') {
+                    console.log('处理普通对象');
+                    console.log('Object.keys(data):', Object.keys(data));
+                    
+                    // 直接按传入对象的键顺序初始化
+                    Object.keys(data).forEach(key => {
+                        if (key !== "_order") {
+                            this._keys.push(key);
+                            this._values[key] = data[key];
+                        }
+                    });
+                }
+                
+                console.log('OrderedMap初始化后的_keys:', this._keys);
+            }
+            set(key, value) {
+                if (!this._values.hasOwnProperty(key)) {
+                    this._keys.push(key);
+                }
+                this._values[key] = value;
+                return this;
+            }
+
+            get(key) {
+                return this._values[key];
+            }
+
+            has(key) {
+                return this._values.hasOwnProperty(key);
+            }
+
+            delete(key) {
+                if (this.has(key)) {
+                    const index = this._keys.indexOf(key);
+                    if (index > -1) {
+                        this._keys.splice(index, 1);
+                    }
+                    delete this._values[key];
+                    return true;
+                }
+                return false;
+            }
+
+            keys() {
+                return [...this._keys];
+            }
+
+            values() {
+                return this._keys.map(key => this._values[key]);
+            }
+
+            entries() {
+                return this._keys.map(key => [key, this._values[key]]);
+            }
+
+            forEach(callback) {
+                this._keys.forEach(key => {
+                    callback(this._values[key], key, this);
+                });
+            }
+
+            toObject() {
+                const obj = {};
+                this._keys.forEach(key => {
+                    obj[key] = this._values[key];
+                });
+                // 添加_order属性，方便后端识别顺序
+                obj._order = [...this._keys];
+                return obj;
+            }
+
+            toJSON() {
+                return this.toObject();
+            }
+
+            size() {
+                return this._keys.length;
+            }
+
+            clear() {
+                this._keys = [];
+                this._values = {};
+            }
+        }
+
+        // ===================== 初始化函数 =====================
+        window.onload = async function() {
+            // 检查本地存储中是否有保存的令牌
+            const savedToken = localStorage.getItem('iptv_auth_token');
+            
+            if (savedToken) {
+                authToken = savedToken;
+                isAuthenticated = true;
+                hideLoginModal();
+                await initializeApp();
+            } else {
+                // 显示登录界面
+                showLoginModal();
+            }
+        };
+
+        // ===================== 登录相关函数 =====================
+        /**
+         * 显示登录模态框
+         */
+        function showLoginModal() {
+            document.getElementById('loginModal').style.display = 'block';
+            document.getElementById('mainContainer').style.display = 'none';
+            document.getElementById('loginForm').style.display = 'block';
+            document.getElementById('changePasswordForm').style.display = 'none';
+            document.getElementById('password').value = '';
+            document.getElementById('loginError').style.display = 'none';
+            document.getElementById('password').focus();
+        }
+
+        /**
+         * 隐藏登录模态框，显示主内容
+         */
+        function hideLoginModal() {
+            document.getElementById('loginModal').style.display = 'none';
+            document.getElementById('mainContainer').style.display = 'block';
+            document.getElementById('password').value = '';
+            document.getElementById('loginError').style.display = 'none';
+            // 显示退出按钮
+            document.getElementById('logoutBtn').style.display = 'block';
+        }
+
+        /**
+         * 显示修改密码表单
+         */
+        function showChangePasswordForm() {
+            document.getElementById('loginForm').style.display = 'none';
+            document.getElementById('changePasswordForm').style.display = 'block';
+            document.getElementById('oldPassword').value = '';
+            document.getElementById('newPassword').value = '';
+            document.getElementById('confirmPassword').value = '';
+            document.getElementById('passwordError').style.display = 'none';
+            document.getElementById('oldPassword').focus();
+        }
+
+        /**
+         * 显示登录表单
+         */
+        function showLoginForm() {
+            document.getElementById('loginForm').style.display = 'block';
+            document.getElementById('changePasswordForm').style.display = 'none';
+            document.getElementById('password').focus();
+        }
+
+        /**
+         * 处理登录
+         */
+        async function handleLogin() {
+            const password = document.getElementById('password').value.trim();
+            
+            if (!password) {
+                showLoginError('请输入密码');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/auth/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ password: password })
+                });
+                
+                const result = await response.json();
+                
+                if (result.code === 200) {
+                    // 登录成功
+                    authToken = result.data.token;
+                    isAuthenticated = true;
+                    
+                    // 保存到本地存储
+                    localStorage.setItem('iptv_auth_token', authToken);
+                    
+                    hideLoginModal();
+                    await initializeApp();
+                } else {
+                    showLoginError(result.msg || '密码错误');
+                }
+            } catch (error) {
+                console.error('登录请求失败:', error);
+                showLoginError('网络请求失败，请检查连接');
+            }
+        }
+
+        /**
+         * 显示登录错误
+         */
+        function showLoginError(message) {
+            const errorDiv = document.getElementById('loginError');
+            errorDiv.textContent = message;
+            errorDiv.style.display = 'block';
+            
+            // 清空密码框
+            document.getElementById('password').value = '';
+            document.getElementById('password').focus();
+        }
+
+        /**
+         * 处理修改密码
+         */
+        async function handleChangePassword() {
+            const oldPassword = document.getElementById('oldPassword').value.trim();
+            const newPassword = document.getElementById('newPassword').value.trim();
+            const confirmPassword = document.getElementById('confirmPassword').value.trim();
+            const errorDiv = document.getElementById('passwordError');
+            
+            // 验证输入
+            if (!oldPassword || !newPassword || !confirmPassword) {
+                errorDiv.textContent = '所有字段都必须填写';
+                errorDiv.style.display = 'block';
+                return;
+            }
+            
+            if (newPassword.length < 4) {
+                errorDiv.textContent = '新密码长度至少4位';
+                errorDiv.style.display = 'block';
+                return;
+            }
+            
+            if (newPassword !== confirmPassword) {
+                errorDiv.textContent = '两次输入的新密码不一致';
+                errorDiv.style.display = 'block';
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/auth/change-password', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Auth-Token': authToken || ''
+                    },
+                    body: JSON.stringify({
+                        old_password: oldPassword,
+                        new_password: newPassword
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (result.code === 200) {
+                    alert('密码修改成功！请使用新密码重新登录');
+                    
+                    // 清除本地存储，强制重新登录
+                    localStorage.removeItem('iptv_auth_token');
+                    authToken = null;
+                    isAuthenticated = false;
+                    
+                    // 返回登录界面
+                    showLoginForm();
+                    
+                    // 清空表单
+                    document.getElementById('oldPassword').value = '';
+                    document.getElementById('newPassword').value = '';
+                    document.getElementById('confirmPassword').value = '';
+                } else {
+                    errorDiv.textContent = result.msg || '修改密码失败';
+                    errorDiv.style.display = 'block';
+                }
+            } catch (error) {
+                console.error('修改密码失败:', error);
+                errorDiv.textContent = '网络请求失败，请检查连接';
+                errorDiv.style.display = 'block';
+            }
+        }
+
+        /**
+         * 退出登录
+         */
+        function logout() {
+            if (confirm('确定要退出登录吗？')) {
+                // 清除登录状态
+                isAuthenticated = false;
+                authToken = null;
+                localStorage.removeItem('iptv_auth_token');
+                
+                // 隐藏退出按钮
+                document.getElementById('logoutBtn').style.display = 'none';
+                
+                // 显示登录界面
+                showLoginModal();
+                
+                // 清空页面数据
+                document.getElementById('categories-container').innerHTML = '';
+                document.getElementById('preset-channels-container').innerHTML = '';
+                document.getElementById('mapping-container').innerHTML = '';
+                document.getElementById('third-party-url-list').innerHTML = '';
+                document.getElementById('schedule-list').innerHTML = '';
+            }
+        }
+
+        // ===================== 增强的API调用函数 =====================
+        /**
+         * 统一的API调用函数 - 添加认证头
+         */
+        async function callAPI(endpoint, method = 'GET', data = null) {
+            const options = {
+                method,
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            };
+            
+            // 添加认证头
+            if (authToken) {
+                options.headers['X-Auth-Token'] = authToken;
+            }
+            
+            if (data && (method === 'POST' || method === 'PUT' || method === 'DELETE')) {
+                options.body = JSON.stringify(data);
+            }
+            
+            try {
+                const response = await fetch(endpoint, options);
+                const result = await response.json();
+                
+                // 检查是否需要重新认证
+                if (result.code === 401) {
+                    // 认证过期，重新登录
+                    isAuthenticated = false;
+                    authToken = null;
+                    localStorage.removeItem('iptv_auth_token');
+                    showLoginModal();
+                    throw new Error('会话已过期，请重新登录');
+                }
+                
+                // 适配不同接口的成功码：200(config)、0(ip/rtp/third-party)
+                const successCodes = [200, 0];
+                if (!successCodes.includes(result.code)) {
+                    throw new Error(result.msg || 'API返回错误');
+                }
+                
+                return result.data;
+            } catch (error) {
+                console.error(`API调用失败 ${endpoint}:`, error);
+                
+                // 如果是认证错误，显示登录界面
+                if (error.message.includes('认证') || error.message.includes('登录') || error.message.includes('会话')) {
+                    showLoginModal();
+                }
+                
+                throw error;
+            }
+        }
+
+        // ===================== 应用初始化 =====================
+        async function initializeApp() {
+            try {
+                await loadAllConfigFromServer();
+                await initIpFiles();
+                await initRtpFiles();
+                renderThirdPartyUrls();
+                renderCategories();
+                renderChannelLibrary();
+                renderSchedules();
+                initSortable();
+                bindAllEvents();
+            } catch (error) {
+                console.error('初始化失败:', error);
+                if (!error.message.includes('认证') && !error.message.includes('登录')) {
+                    alert('初始化失败：' + error.message);
+                    loadDefaultConfig();
+                    renderThirdPartyUrls();
+                    renderCategories();
+                    renderChannelLibrary();
+                    renderSchedules();
+                    initSortable();
+                    bindAllEvents();
+                }
+            }
+        }
+
+        // ===================== 原有的应用函数（保持不变） =====================
+        /**
+         * 从后端加载所有配置，严格保持顺序
+         */
+        async function loadAllConfigFromServer() {
+            try {
+                const response = await fetch('/api/config');
+                const result = await response.json();
+                
+                if (result.code === 200 || result.code === 0) {
+                    const data = result.data;
+                    
+                    console.log('API返回的categories:', data.categories);
+                    
+                    // 处理 categories
+                    if (data.categories) {
+                        // 检查是否有 _order 字段
+                        if (data.categories._order && Array.isArray(data.categories._order)) {
+                            console.log('使用_order字段:', data.categories._order);
+                            // 有 _order 字段，按它初始化
+                            const orderedData = new OrderedMap();
+                            data.categories._order.forEach(key => {
+                                if (key !== "_order" && data.categories[key]) {
+                                    orderedData.set(key, data.categories[key]);
+                                }
+                            });
+                            categoryData = orderedData;
+                        } else {
+                            console.log('没有_order字段，使用Object.keys顺序');
+                            // 没有 _order 字段，直接使用 Object.keys 的顺序
+                            categoryData = new OrderedMap(data.categories);
+                        }
+                    }
+                    
+                    // 处理 mapping
+                    if (data.mapping) {
+                        mappingData = new OrderedMap(data.mapping);
+                    }
+                    
+                    thirdPartyUrls = data.third_party_urls || {};
+                    
+                    // 处理定时更新配置
+                    if (data.settings && data.settings.schedules) {
+                        scheduleData = data.settings.schedules || [];
+                    } else {
+                        // 默认定时任务
+                        scheduleData = [
+                            { id: 1, time: "04:00", enabled: true },
+                            { id: 2, time: "12:00", enabled: true },
+                            { id: 3, time: "20:00", enabled: true }
+                        ];
+                    }
+                    
+                    extractAllChannels();
+                    
+                    console.log('加载后的分类顺序:', categoryData.keys());
+                    console.log('加载后的映射顺序:', mappingData.keys());
+                    console.log('加载后的定时任务:', scheduleData);
+                }
+            } catch (error) {
+                console.error('加载配置失败:', error);
+                loadDefaultConfig();
+            }
+        }
+
+        /**
+         * 加载默认配置
+         */
+        function loadDefaultConfig() {
+            // 使用数组格式初始化，确保顺序严格按照定义的来
+            categoryData = new OrderedMap([
+                ["央视频道", ["CCTV1"]],
+                ["卫视频道", ["湖南卫视"]],
+                ["数字频道", ["CHC动作电影"]]
+            ]);
+            
+            mappingData = new OrderedMap([
+                ["CCTV1", ["CCTV-1", "CCTV1-综合"]],
+                ["嘉佳卡通", ["佳佳卡通"]],
+                ["中国天气", ["中国天气", "中国天气频道"]]
+            ]);
+            
+            thirdPartyUrls = {
+                "https://raw.githubusercontent.com/kakaxi-1/zubo/main/IPTV.txt": "source1.txt"
+            };
+            
+            // 默认定时任务
+            scheduleData = [
+                { id: 1, time: "04:00", enabled: true },
+                { id: 2, time: "12:00", enabled: true },
+                { id: 3, time: "20:00", enabled: true }
+            ];
+            
+            extractAllChannels();
+        }
+
+        /**
+         * 提取所有频道
+         */
+        function extractAllChannels() {
+            let channelsFromCategories = [];
+            categoryData.forEach(channels => {
+                channelsFromCategories = [...channelsFromCategories, ...channels];
+            });
+    
+            const channelsFromMapping = mappingData.keys();
+            ALL_CHANNELS = [...new Set([...channelsFromCategories, ...channelsFromMapping])];
+        }
+
+        // ===================== 定时更新配置相关函数 =====================
+        /**
+         * 渲染定时更新任务列表
+         */
+        function renderSchedules() {
+            const container = document.getElementById('schedule-list');
+            if (!container) return;
+            
+            container.innerHTML = '';
+            
+            if (!scheduleData || scheduleData.length === 0) {
+                scheduleData = [
+                    { id: 1, time: "04:00", enabled: true },
+                    { id: 2, time: "12:00", enabled: true },
+                    { id: 3, time: "20:00", enabled: true }
+                ];
+            }
+            
+            if (scheduleData.length === 0) {
+                const emptyHtml = `
+                    <div class="empty-schedule">
+                        <p>暂无定时任务</p>
+                        <p style="font-size: 14px;">点击"添加定时任务"按钮创建新的定时更新</p>
+                    </div>
+                `;
+                container.innerHTML = emptyHtml;
+                return;
+            }
+            
+            scheduleData.forEach((schedule, index) => {
+                const scheduleItem = document.createElement('div');
+                scheduleItem.className = 'schedule-item';
+                scheduleItem.dataset.id = schedule.id || index;
+                
+                const enabledText = schedule.enabled ? '启用中' : '已禁用';
+                const description = schedule.enabled 
+                    ? `将在北京时间 ${schedule.time} 自动执行IPTV更新`
+                    : '此定时任务已禁用，不会执行';
+                
+                scheduleItem.innerHTML = `
+                    <div class="schedule-header">
+                        <input type="text" class="schedule-time-input" value="${schedule.time}" placeholder="HH:MM" 
+                               onchange="updateScheduleTime(${schedule.id || index}, this.value)">
+                        <div class="schedule-enabled">
+                            <label class="schedule-switch">
+                                <input type="checkbox" ${schedule.enabled ? 'checked' : ''} 
+                                       onchange="toggleScheduleEnabled(${schedule.id || index}, this.checked)">
+                                <span class="schedule-slider"></span>
+                            </label>
+                            <span class="schedule-label">${enabledText}</span>
+                            <button class="btn-delete" onclick="deleteSchedule(${schedule.id || index})">删除</button>
+                        </div>
+                    </div>
+                    <div class="schedule-footer">
+                        <span class="schedule-description">${description}</span>
+                    </div>
+                `;
+                container.appendChild(scheduleItem);
+            });
+            
+            // 添加警告信息
+            const warningDiv = document.createElement('div');
+            warningDiv.className = 'schedule-warning';
+            warningDiv.innerHTML = `
+                <strong>提示：</strong>定时更新任务会在服务器端执行，请确保服务器时间准确，当前共配置了 ${scheduleData.length} 个定时任务。
+            `;
+            container.appendChild(warningDiv);
+        }
+
+        /**
+         * 验证时间格式
+         */
+        function validateTimeFormat(timeStr) {
+            const timeRegex = /^([01]\d|2[0-3]):([0-5]\d)$/;
+            if (!timeRegex.test(timeStr)) {
+                alert('时间格式无效，请使用24小时制格式 HH:MM，例如 04:00 或 14:30');
+                return false;
+            }
+            return true;
+        }
+
+        /**
+         * 更新定时任务时间
+         */
+        function updateScheduleTime(scheduleId, newTime) {
+            if (!validateTimeFormat(newTime)) {
+                // 恢复原值
+                const schedule = scheduleData.find(s => (s.id || s) === scheduleId);
+                if (schedule) {
+                    const input = document.querySelector(`.schedule-item[data-id="${scheduleId}"] .schedule-time-input`);
+                    if (input) input.value = schedule.time;
+                }
+                return;
+            }
+            
+            const scheduleIndex = scheduleData.findIndex(s => (s.id || s) === scheduleId);
+            if (scheduleIndex !== -1) {
+                scheduleData[scheduleIndex].time = newTime;
+                scheduleChanged = true;
+                
+                // 更新描述
+                const description = scheduleData[scheduleIndex].enabled 
+                    ? `将在北京时间 ${newTime} 自动执行IPTV更新`
+                    : '此定时任务已禁用，不会执行';
+                
+                const descElement = document.querySelector(`.schedule-item[data-id="${scheduleId}"] .schedule-description`);
+                if (descElement) {
+                    descElement.textContent = description;
+                }
+            }
+        }
+
+        /**
+         * 切换定时任务启用状态
+         */
+        function toggleScheduleEnabled(scheduleId, enabled) {
+            const scheduleIndex = scheduleData.findIndex(s => (s.id || s) === scheduleId);
+            if (scheduleIndex !== -1) {
+                scheduleData[scheduleIndex].enabled = enabled;
+                scheduleChanged = true;
+                
+                // 更新标签和描述
+                const enabledText = enabled ? '启用中' : '已禁用';
+                const description = enabled 
+                    ? `将在北京时间 ${scheduleData[scheduleIndex].time} 自动执行IPTV更新`
+                    : '此定时任务已禁用，不会执行';
+                
+                const labelElement = document.querySelector(`.schedule-item[data-id="${scheduleId}"] .schedule-label`);
+                const descElement = document.querySelector(`.schedule-item[data-id="${scheduleId}"] .schedule-description`);
+                
+                if (labelElement) labelElement.textContent = enabledText;
+                if (descElement) descElement.textContent = description;
+            }
+        }
+
+        /**
+         * 删除定时任务
+         */
+        function deleteSchedule(scheduleId) {
+            if (scheduleData.length <= 1) {
+                alert('至少保留一个定时任务！');
+                return;
+            }
+            
+            if (!confirm('确定要删除这个定时任务吗？')) {
+                return;
+            }
+            
+            const scheduleIndex = scheduleData.findIndex(s => (s.id || s) === scheduleId);
+            if (scheduleIndex !== -1) {
+                scheduleData.splice(scheduleIndex, 1);
+                scheduleChanged = true;
+                renderSchedules();
+            }
+        }
+
+        /**
+         * 添加新的定时任务
+         */
+        function addNewSchedule() {
+            // 找到下一个可用的时间（默认在最后一个任务时间+1小时）
+            let defaultTime = "08:00";
+            if (scheduleData.length > 0) {
+                const lastSchedule = scheduleData[scheduleData.length - 1];
+                const lastTime = lastSchedule.time;
+                const [hours, minutes] = lastTime.split(':').map(Number);
+                
+                let newHours = hours + 1;
+                if (newHours >= 24) newHours = 0;
+                
+                defaultTime = `${newHours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
+            }
+            
+            // 生成新ID
+            const newId = scheduleData.length > 0 
+                ? Math.max(...scheduleData.map(s => s.id || 0)) + 1
+                : scheduleData.length + 1;
+            
+            const newSchedule = {
+                id: newId,
+                time: defaultTime,
+                enabled: true
+            };
+            
+            scheduleData.push(newSchedule);
+            scheduleChanged = true;
+            renderSchedules();
+        }
+
+        /**
+         * 保存定时更新配置
+         */
+        async function saveScheduleConfig() {
+            const btn = document.getElementById('save-schedule-btn');
+            const originalText = btn.innerHTML;
+            
+            btn.disabled = true;
+            btn.innerHTML = '<span class="loading"></span>保存中...';
+            
+            try {
+                // 验证所有时间格式
+                for (const schedule of scheduleData) {
+                    if (!validateTimeFormat(schedule.time)) {
+                        throw new Error(`定时任务时间格式无效: ${schedule.time}`);
+                    }
+                }
+                
+                // 加载当前配置
+                const config = await callAPI('/api/config');
+                
+                // 更新配置中的定时任务
+                if (!config.settings) config.settings = {};
+                config.settings.schedules = scheduleData;
+                
+                // 保存到服务器
+                await callAPI('/api/config', 'POST', config);
+                
+                alert('定时更新配置保存成功！');
+                scheduleChanged = false;
+                
+                // 重新加载配置
+                await loadAllConfigFromServer();
+                
+            } catch (error) {
+                console.error('保存定时配置失败:', error);
+                alert('保存失败：' + error.message);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = originalText;
+            }
+        }
+
+        // ===================== 第三方URL相关函数 =====================
+        /**
+         * 渲染第三方URL列表
+         */
+        function renderThirdPartyUrls() {
+            const container = document.getElementById('third-party-url-list');
+            if (!container) return;
+            
+            container.innerHTML = '';
+            
+            if (Object.keys(thirdPartyUrls).length === 0) {
+                thirdPartyUrls = {
+                    "https://raw.githubusercontent.com/kakaxi-1/zubo/main/IPTV.txt": "source1.txt"
+                };
+            }
+            
+            Object.entries(thirdPartyUrls).forEach(([url, filename]) => {
+                const urlItem = document.createElement('div');
+                urlItem.className = 'url-item';
+                urlItem.innerHTML = `
+                    <input type="text" class="url-input" value="${escapeHtml(url)}" placeholder="输入IPTV源URL">
+                    <input type="text" class="filename-input" value="${escapeHtml(filename)}" placeholder="文件名.txt" onblur="validateFilename(this)">
+                    <button class="delete-url-btn" onclick="deleteUrlItem(this)">删除</button>
+                `;
+                container.appendChild(urlItem);
+            });
+        }
+
+        /**
+         * 验证文件名格式
+         */
+        function validateFilename(input) {
+            let filename = input.value.trim();
+            if (!filename) {
+                alert('文件名不能为空');
+                input.value = 'source' + (document.querySelectorAll('.url-item').length) + '.txt';
+                return;
+            }
+            if (!filename.endsWith('.txt')) {
+                filename += '.txt';
+                input.value = filename;
+            }
+            if (!/^[a-zA-Z0-9_\-\u4e00-\u9fa5]+\.txt$/.test(filename)) {
+                alert('文件名只能包含字母、数字、下划线、短横线和中文！');
+                input.value = 'source' + (document.querySelectorAll('.url-item').length) + '.txt';
+            }
+        }
+
+        /**
+         * 添加新的URL项
+         */
+        function addNewUrlItem() {
+            const container = document.getElementById('third-party-url-list');
+            const urlItem = document.createElement('div');
+            urlItem.className = 'url-item';
+            urlItem.innerHTML = `
+                <input type="text" class="url-input" placeholder="输入IPTV源URL">
+                <input type="text" class="filename-input" value="source${document.querySelectorAll('.url-item').length + 1}.txt" placeholder="文件名.txt" onblur="validateFilename(this)">
+                <button class="delete-url-btn" onclick="deleteUrlItem(this)">删除</button>
+            `;
+            container.appendChild(urlItem);
+            urlItem.querySelector('.url-input').focus();
+        }
+
+        /**
+         * 删除URL项
+         */
+        function deleteUrlItem(btn) {
+            const urlItems = document.querySelectorAll('.url-item');
+            if (urlItems.length <= 1) {
+                alert('至少保留一个URL源！');
+                return;
+            }
+            if (confirm('确定要删除这个URL吗？')) {
+                btn.closest('.url-item').remove();
+            }
+        }
+
+        /**
+         * 手动更新IPTV频道
+         */
+        async function updateIPTVChannels() {
+            if (isUpdatingIPTV) {
+                alert('更新正在进行中，请稍候...');
+                return;
+            }
+
+            const btn = document.getElementById('update-iptv-btn');
+            const originalText = btn.innerHTML;
+            
+            btn.disabled = true;
+            btn.innerHTML = '<span class="loading"></span>更新中...';
+            isUpdatingIPTV = true;
+
+            try {
+                // 调用后端 /api/iptv/update 接口
+                const response = await fetch('/api/iptv/update', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Auth-Token': authToken || ''
+                    }
+                });
+                
+                const result = await response.json();
+                
+                if (result.code === 200 || result.code === 0) {
+                    alert('IPTV频道更新成功！' + (result.msg ? '\n' + result.msg : ''));
+                    
+                    // 更新完成后重新加载频道数据
+                    await loadAllConfigFromServer();
+                    renderChannelLibrary();
+                    renderCategories();
+                    
+                    // 如果是基础配置页面，重新渲染映射
+                    if (document.getElementById('mapping-panel').style.display !== 'none') {
+                        renderMappings();
+                    }
+                } else {
+                    throw new Error(result.msg || '更新失败');
+                }
+            } catch (error) {
+                console.error('更新IPTV频道失败:', error);
+                alert('更新失败：' + error.message);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = originalText;
+                isUpdatingIPTV = false;
+            }
+        }
+
+        // ===================== 基础配置相关函数（IP/RTP） =====================
+        /**
+         * 初始化IP文件列表
+         */
+        async function initIpFiles() {
+            try {
+                const files = await callAPI('/api/ip/files');
+                const select = document.getElementById('ipFileSelect');
+                select.innerHTML = '';
+                files.forEach(f => {
+                    const option = document.createElement('option');
+                    option.value = f;
+                    option.textContent = f;
+                    select.appendChild(option);
+                });
+                if (files.length > 0) loadIpFile(files[0]);
+            } catch (error) {
+                console.error('初始化IP文件失败:', error);
+                alert('初始化IP文件失败：' + error.message);
+            }
+        }
+
+        /**
+         * 加载IP文件内容
+         */
+        async function loadIpFile(filename) {
+            try {
+                const encodedFilename = encodeURIComponent(filename);
+                const content = await callAPI(`/api/ip/file/${encodedFilename}`);
+                document.getElementById('ipContent').value = content;
+            } catch (error) {
+                console.error('加载IP文件失败:', error);
+                alert('加载IP文件失败：' + error.message);
+                document.getElementById('ipContent').value = '';
+            }
+        }
+
+        /**
+         * 保存IP文件
+         */
+        async function saveIpFile() {
+            const filename = document.getElementById('ipFileSelect').value;
+            const content = document.getElementById('ipContent').value;
+            
+            if (!filename) {
+                throw new Error('请选择要保存的IP文件！');
+            }
+            
+            try {
+                const encodedFilename = encodeURIComponent(filename);
+                await callAPI(`/api/ip/file/${encodedFilename}`, 'POST', { content });
+                return 'IP文件保存成功';
+            } catch (error) {
+                console.error('保存IP文件失败:', error);
+                throw error;
+            }
+        }
+
+        /**
+         * 初始化RTP文件列表
+         */
+        async function initRtpFiles() {
+            try {
+                const files = await callAPI('/api/rtp/files');
+                const select = document.getElementById('rtpFileSelect');
+                select.innerHTML = '';
+                files.forEach(f => {
+                    const option = document.createElement('option');
+                    option.value = f;
+                    option.textContent = f;
+                    select.appendChild(option);
+                });
+                if (files.length > 0) loadRtpFile(files[0]);
+            } catch (error) {
+                console.error('初始化RTP文件失败:', error);
+                alert('初始化RTP文件失败：' + error.message);
+            }
+        }
+
+        /**
+         * 加载RTP文件内容
+         */
+        async function loadRtpFile(filename) {
+            try {
+                const encodedFilename = encodeURIComponent(filename);
+                const content = await callAPI(`/api/rtp/file/${encodedFilename}`);
+                document.getElementById('rtpContent').value = content;
+            } catch (error) {
+                console.error('加载RTP文件失败:', error);
+                alert('加载RTP文件失败：' + error.message);
+                document.getElementById('rtpContent').value = '';
+            }
+        }
+
+        /**
+         * 保存RTP文件
+         */
+        async function saveRtpFile() {
+            const filename = document.getElementById('rtpFileSelect').value;
+            const content = document.getElementById('rtpContent').value;
+            
+            if (!filename) {
+                throw new Error('请选择要保存的RTP文件！');
+            }
+            
+            try {
+                const encodedFilename = encodeURIComponent(filename);
+                await callAPI(`/api/rtp/file/${encodedFilename}`, 'POST', { content });
+                return 'RTP文件保存成功';
+            } catch (error) {
+                console.error('保存RTP文件失败:', error);
+                throw error;
+            }
+        }
+
+        /**
+         * 打开新建文件弹窗
+         */
+        function openNewFileModal(type) {
+            currentNewFileType = type;
+            const modal = document.getElementById('newFileModal');
+            const title = document.getElementById('newFileModalTitle');
+            const input = document.getElementById('newFileName');
+            
+            title.textContent = type === 'ip' ? '新建IP文件' : '新建RTP文件';
+            input.value = '';
+            modal.style.display = 'block';
+            input.focus();
+        }
+
+        /**
+         * 关闭新建文件弹窗
+         */
+        function closeNewFileModal(event) {
+            event.stopPropagation();
+            document.getElementById('newFileModal').style.display = 'none';
+            currentNewFileType = '';
+        }
+
+        /**
+         * 保存新建文件
+         */
+        async function saveNewFile(event) {
+            event.stopPropagation();
+            
+            let filename = document.getElementById('newFileName').value.trim();
+            if (!filename) {
+                alert('文件名不能为空！');
+                return;
+            }
+            
+            if (!filename.endsWith('.txt')) {
+                filename += '.txt';
+            }
+            
+            if (!/^[a-zA-Z0-9_\-\u4e00-\u9fa5]+\.txt$/.test(filename)) {
+                alert('文件名只能包含字母、数字、下划线、短横线和中文！');
+                return;
+            }
+            
+            try {
+                const encodedFilename = encodeURIComponent(filename);
+                const endpoint = currentNewFileType === 'ip' 
+                    ? `/api/ip/file/${encodedFilename}`
+                    : `/api/rtp/file/${encodedFilename}`;
+                
+                await callAPI(endpoint, 'POST', { content: '' });
+                
+                alert(`创建${currentNewFileType === 'ip' ? 'IP' : 'RTP'}文件成功！`);
+                
+                if (currentNewFileType === 'ip') {
+                    await initIpFiles();
+                } else if (currentNewFileType === 'rtp') {
+                    await initRtpFiles();
+                }
+                
+                closeNewFileModal(event);
+            } catch (error) {
+                console.error('创建新文件失败:', error);
+                alert('创建失败：' + error.message);
+            }
+        }
+
+        /**
+         * 删除选中的文件
+         */
+        async function deleteSelectedFile(type) {
+            let filename;
+            if (type === 'ip') {
+                filename = document.getElementById('ipFileSelect').value;
+            } else if (type === 'rtp') {
+                filename = document.getElementById('rtpFileSelect').value;
+            }
+            
+            if (!filename) {
+                alert('请先选择要删除的文件！');
+                return;
+            }
+            
+            if (!confirm(`确定要删除文件 "${filename}" 吗？此操作不可恢复！`)) {
+                return;
+            }
+            
+            try {
+                const encodedFilename = encodeURIComponent(filename);
+                const endpoint = type === 'ip'
+                    ? `/api/ip/file/${encodedFilename}`
+                    : `/api/rtp/file/${encodedFilename}`;
+                
+                await callAPI(endpoint, 'DELETE');
+                
+                alert(`删除${type === 'ip' ? 'IP' : 'RTP'}文件成功！`);
+                
+                if (type === 'ip') {
+                    await initIpFiles();
+                    document.getElementById('ipContent').value = '';
+                } else if (type === 'rtp') {
+                    await initRtpFiles();
+                    document.getElementById('rtpContent').value = '';
+                }
+            } catch (error) {
+                console.error('删除文件失败:', error);
+                alert('删除失败：' + error.message);
+            }
+        }
+
+        // ===================== 保存所有基础配置 =====================
+        /**
+         * 保存所有基础配置（第三方URL + IP文件 + RTP文件）
+         */
+        async function saveAllBasicConfig() {
+            const btn = document.getElementById('save-basic-config');
+            const originalText = btn.innerHTML;
+            
+            btn.disabled = true;
+            btn.innerHTML = '<span class="loading"></span>保存中...';
+            
+            try {
+                // 收集第三方URL配置
+                const urlItems = document.querySelectorAll('.url-item');
+                const newThirdPartyUrls = {};
+                
+                urlItems.forEach(item => {
+                    const urlInput = item.querySelector('.url-input');
+                    const filenameInput = item.querySelector('.filename-input');
+                    
+                    const url = urlInput.value.trim();
+                    const filename = filenameInput.value.trim();
+                    
+                    if (!url) {
+                        alert('URL不能为空！');
+                        urlInput.focus();
+                        throw new Error('URL不能为空');
+                    }
+                    
+                    if (!filename) {
+                        alert('文件名不能为空！');
+                        filenameInput.focus();
+                        throw new Error('文件名不能为空');
+                    }
+                    
+                    if (!filename.endsWith('.txt')) {
+                        alert('文件名必须以.txt结尾！');
+                        filenameInput.focus();
+                        throw new Error('文件名必须以.txt结尾');
+                    }
+                    
+                    if (!/^[a-zA-Z0-9_\-\u4e00-\u9fa5]+\.txt$/.test(filename)) {
+                        alert('文件名只能包含字母、数字、下划线、短横线和中文！');
+                        filenameInput.focus();
+                        throw new Error('文件名格式错误');
+                    }
+                    
+                    newThirdPartyUrls[url] = filename;
+                });
+
+                // 保存配置（保持顺序）
+                const configData = {
+                    categories: categoryData.toObject(), // 转换为带_order的对象
+                    mapping: mappingData.toObject(),     // 转换为带_order的对象
+                    third_party_urls: newThirdPartyUrls,
+                    settings: {
+                        RUN_INTERVAL_HOURS: 2,
+                        FFMPEG_MAX_DETECT_TIME: 40,
+                        FFMPEG_TEST_DURATION: 15,
+                        RESPONSE_TIME_THRESHOLD: 10,
+                        STREAM_STABLE_THRESHOLD: 0.5,
+                        schedules: scheduleData  // 包含定时任务
+                    }
+                };
+                
+                await callAPI('/api/config', 'POST', configData);
+                
+                // 保存IP文件
+                let ipResult = '未选择IP文件，跳过保存';
+                if (document.getElementById('ipFileSelect').value) {
+                    ipResult = await saveIpFile();
+                }
+                
+                // 保存RTP文件
+                let rtpResult = '未选择RTP文件，跳过保存';
+                if (document.getElementById('rtpFileSelect').value) {
+                    rtpResult = await saveRtpFile();
+                }
+                
+                // 更新本地配置
+                thirdPartyUrls = newThirdPartyUrls;
+                
+                alert(`保存成功！
+- 第三方URL配置：保存成功
+- ${ipResult}
+- ${rtpResult}`);
+                
+                // 重新加载最新配置
+                await loadAllConfigFromServer();
+                
+            } catch (error) {
+                console.error('保存基础配置失败:', error);
+                alert('保存失败：' + error.message);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = originalText;
+            }
+        }
+
+        // ===================== 分类/映射相关函数 =====================
+        /**
+         * 初始化拖拽排序
+         */
+        function initSortable() {
+            // 分类整体排序
+            const categoryContainer = document.getElementById('categories-container');
+            if (categoryContainer) {
+                new Sortable(categoryContainer, {
+                    animation: 150,
+                    ghostClass: 'sortable-ghost',
+                    onEnd: (evt) => {
+                        // 重新构建OrderedMap以反映新的顺序
+                        const newCategoryData = new OrderedMap();
+                        document.querySelectorAll('.category-card').forEach(card => {
+                            const catName = card.dataset.name;
+                            newCategoryData.set(catName, categoryData.get(catName));
+                        });
+                        categoryData = newCategoryData;
+                    }
+                });
+            }
+
+            // 分类内频道排序
+            document.querySelectorAll('.channel-tags').forEach(tagsContainer => {
+                new Sortable(tagsContainer, {
+                    animation: 150,
+                    ghostClass: 'sortable-ghost',
+                    onEnd: (e) => {
+                        const catName = tagsContainer.closest('.category-card').dataset.name;
+                        const newChannels = [];
+                        tagsContainer.querySelectorAll('.channel-tag').forEach(tag => {
+                            const channelName = tag.textContent.replace('×', '').trim();
+                            newChannels.push(channelName);
+                        });
+                        categoryData.set(catName, newChannels);
+                    }
+                });
+            });
+        }
+
+        /**
+         * HTML转义函数
+         */
+        function escapeHtml(text) {
+            if (!text) return '';
+            return text.replace(/&/g, '&amp;')
+                       .replace(/</g, '&lt;')
+                       .replace(/>/g, '&gt;')
+                       .replace(/"/g, '&quot;')
+                       .replace(/'/g, '&#039;');
+        }
+
+        /**
+         * 渲染分类面板（严格保持OrderedMap的顺序）
+         */
+        function renderCategories() {
+            const container = document.getElementById('categories-container');
+            if (!container) return;
+            
+            container.innerHTML = '';
+            
+            if (categoryData.size() === 0) {
+                categoryData.set('默认分类', []);
+                activeCategoryName = '默认分类';
+            }
+            
+            console.log('renderCategories - categoryData顺序:', categoryData.keys());
+            
+            // 关键：使用entries()方法，严格按照OrderedMap内部的顺序渲染
+            categoryData.entries().forEach(([catName, channels]) => {
+                const isActive = catName === activeCategoryName;
+                const escapedCatName = escapeHtml(catName);
+                const categoryHtml = `
+                    <div class="category-card ${isActive ? 'active' : ''}" data-name="${escapedCatName}">
+                        <div class="category-header">
+                            <input type="text" class="category-name-input" value="${escapedCatName}" placeholder="比如:央视、卫视、地方等" onchange="updateCategoryName('${escapedCatName}', this.value)">
+                            <button class="btn-delete" onclick="deleteCategory('${escapedCatName}')">删除</button>
+                        </div>
+                        <div class="channel-tags">
+                            ${channels.map(channel => {
+                                const escapedChannel = escapeHtml(channel);
+                                return `
+                                    <div class="channel-tag">
+                                        ${escapedChannel} <span class="tag-close" onclick="removeChannelFromCategory('${escapedCatName}', '${escapedChannel}')">×</span>
+                                    </div>
+                                `;
+                            }).join('')}
+                        </div>
+                    </div>
+                `;
+                container.insertAdjacentHTML('beforeend', categoryHtml);
+            });
+
+            bindCategoryActiveEvent();
+        }
+
+        /**
+         * 绑定分类激活事件
+         */
+        function bindCategoryActiveEvent() {
+            document.querySelectorAll('.category-card').forEach(card => {
+                card.onclick = (e) => {
+                    if (e.target.classList.contains('btn-delete') || e.target.classList.contains('category-name-input')) {
+                        return;
+                    }
+                    document.querySelectorAll('.category-card').forEach(c => c.classList.remove('active'));
+                    card.classList.add('active');
+                    activeCategoryName = card.dataset.name;
+                };
+            });
+        }
+
+        /**
+         * 更新分类名称（保持顺序）
+         */
+        function updateCategoryName(oldCatName, newName) {
+            newName = newName.trim();
+            if (!newName) {
+                alert('分类名称不能为空');
+                document.querySelector(`.category-card[data-name="${oldCatName}"] .category-name-input`).value = oldCatName;
+                return;
+            }
+            if (newName === oldCatName) return;
+            if (categoryData.has(newName)) {
+                alert(`分类名称 "${newName}" 已存在`);
+                document.querySelector(`.category-card[data-name="${oldCatName}"] .category-name-input`).value = oldCatName;
+                return;
+            }
+
+            // 获取旧值
+            const oldValue = categoryData.get(oldCatName);
+            
+            // 创建新的 OrderedMap，更新键名但保持原有顺序
+            const newCategoryData = new OrderedMap();
+            categoryData.entries().forEach(([key, value]) => {
+                if (key === oldCatName) {
+                    newCategoryData.set(newName, oldValue);
+                    if (activeCategoryName === oldCatName) {
+                        activeCategoryName = newName;
+                    }
+                } else {
+                    newCategoryData.set(key, value);
+                }
+            });
+            
+            categoryData = newCategoryData;
+            renderCategories();
+        }
+
+        /**
+         * 删除分类（保持顺序）
+         */
+        function deleteCategory(catName) {
+            const categoryCount = categoryData.size();
+            if (categoryCount <= 1) {
+                alert('至少保留1个分类');
+                return;
+            }
+            if (!confirm(`确定删除分类 "${catName}" 吗？`)) {
+                return;
+            }
+
+            // 创建新的 OrderedMap，排除要删除的键，保持其他键的顺序
+            const newCategoryData = new OrderedMap();
+            categoryData.entries().forEach(([key, value]) => {
+                if (key !== catName) {
+                    newCategoryData.set(key, value);
+                }
+            });
+            
+            categoryData = newCategoryData;
+            if (activeCategoryName === catName) {
+                activeCategoryName = categoryData.keys()[0] || null;
+            }
+            renderCategories();
+        }
+
+        /**
+         * 从分类中移除频道
+         */
+        function removeChannelFromCategory(catName, channelName) {
+            const channels = categoryData.get(catName) || [];
+            const newChannels = channels.filter(chan => chan !== channelName);
+            categoryData.set(catName, newChannels);
+            renderCategories();
+        }
+
+        /**
+         * 渲染频道库
+         */
+        function renderChannelLibrary() {
+            const container = document.getElementById('preset-channels-container');
+            if (!container) return;
+            
+            container.innerHTML = '';
+            
+            ALL_CHANNELS.forEach(channel => {
+                const escapedChannel = escapeHtml(channel);
+                const channelHtml = `
+                    <span class="preset-channel" onclick="addChannelToActiveCategory('${escapedChannel}')">
+                        ${escapedChannel}
+                    </span>
+                `;
+                container.insertAdjacentHTML('beforeend', channelHtml);
+            });
+        }
+
+        /**
+         * 添加频道到选中分类
+         */
+        function addChannelToActiveCategory(channelName) {
+            if (!activeCategoryName) {
+                alert('请先选择一个分类');
+                return;
+            }
+            const channels = categoryData.get(activeCategoryName) || [];
+            if (channels.includes(channelName)) {
+                alert(`频道 "${channelName}" 已存在于该分类`);
+                return;
+            }
+            channels.push(channelName);
+            categoryData.set(activeCategoryName, channels);
+            renderCategories();
+        }
+
+        /**
+         * 切换标签页
+         */
+        function switchTab(tab) {
+            // 切换前先读取最新配置
+            loadAllConfigFromServer().then(() => {
+                document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+                document.querySelector(`.tab-btn[onclick="switchTab('${tab}')"]`).classList.add('active');
+        
+                document.getElementById('category-panel').style.display = 'none';
+                document.getElementById('mapping-panel').style.display = 'none';
+                document.getElementById('basic-config-panel').style.display = 'none';
+                document.getElementById('schedule-panel').style.display = 'none';
+        
+                if (tab === 'category') {
+                    document.getElementById('category-panel').style.display = 'block';
+                } else if (tab === 'mapping') {
+                    document.getElementById('mapping-panel').style.display = 'block';
+                    renderMappings();
+                } else if (tab === 'basic-config') {
+                    document.getElementById('basic-config-panel').style.display = 'block';
+                } else if (tab === 'schedule') {
+                    document.getElementById('schedule-panel').style.display = 'block';
+                    renderSchedules();
+                }
+            });
+        }
+
+        /**
+         * 渲染映射列表（严格保持OrderedMap的顺序）
+         */
+        function renderMappings() {
+            const container = document.getElementById('mapping-container');
+            if (!container) return;
+            
+            container.innerHTML = '';
+            
+            if (mappingData.size() === 0) {
+                mappingData.set('默认频道', ['默认别名1', '默认别名2']);
+            }
+            
+            // 关键：使用entries()方法，严格按照OrderedMap内部的顺序渲染
+            mappingData.entries().forEach(([stdName, aliases]) => {
+                const escapedStdName = escapeHtml(stdName);
+                const mappingCard = document.createElement('div');
+                mappingCard.className = 'mapping-card';
+                mappingCard.innerHTML = `
+                    <div class="mapping-header">
+                        <input type="text" class="standard-name-input" value="${escapedStdName}" placeholder="标准频道名" onchange="updateStdName('${escapedStdName}', this.value)">
+                        <button class="btn-delete" onclick="deleteMapping('${escapedStdName}')">删除</button>
+                    </div>
+                    <div class="alias-tags" id="aliases-${escapedStdName}">
+                        ${aliases.map(alias => {
+                            const escapedAlias = escapeHtml(alias);
+                            return `
+                                <div class="alias-tag">
+                                    ${escapedAlias} <span class="tag-close" onclick="removeAlias('${escapedStdName}', '${escapedAlias}')">×</span>
+                                </div>
+                            `;
+                        }).join('')}
+                    </div>
+                    <div class="alias-input-container">
+                        <input type="text" class="alias-input" id="alias-input-${escapedStdName}" placeholder="输入别名（如CCTV-1）">
+                        <button class="add-alias-btn" onclick="addAlias('${escapedStdName}')">添加别名</button>
+                    </div>
+                `;
+                container.appendChild(mappingCard);
+            });
+        }
+
+        /**
+         * 添加别名
+         */
+        function addAlias(stdName) {
+            const input = document.getElementById(`alias-input-${stdName}`);
+            const alias = input.value.trim();
+            
+            if (!alias) {
+                alert('别名不能为空');
+                return;
+            }
+            
+            const aliases = mappingData.get(stdName) || [];
+            if (aliases.includes(alias)) {
+                alert('该别名已存在');
+                return;
+            }
+            
+            aliases.push(alias);
+            mappingData.set(stdName, aliases);
+            input.value = '';
+            mappingChanged = true;
+            
+            const aliasContainer = document.getElementById(`aliases-${stdName}`);
+            const escapedAlias = escapeHtml(alias);
+            aliasContainer.innerHTML += `
+                <div class="alias-tag">
+                    ${escapedAlias} <span class="tag-close" onclick="removeAlias('${stdName}', '${escapedAlias}')">×</span>
+                </div>
+            `;
+        }
+
+        /**
+         * 移除别名
+         */
+        function removeAlias(stdName, alias) {
+            const aliases = mappingData.get(stdName) || [];
+            const newAliases = aliases.filter(a => a !== alias);
+            mappingData.set(stdName, newAliases);
+            mappingChanged = true;
+            renderMappings();
+        }
+
+        /**
+         * 更新标准频道名（保持顺序）
+         */
+        function updateStdName(oldName, newName) {
+            newName = newName.trim();
+            if (!newName) {
+                alert('标准频道名不能为空');
+                document.querySelector(`input[onchange="updateStdName('${oldName}', this.value)"]`).value = oldName;
+                return;
+            }
+            
+            if (newName === oldName) return;
+            
+            if (mappingData.has(newName)) {
+                alert(`标准频道名 "${newName}" 已存在`);
+                document.querySelector(`input[onchange="updateStdName('${oldName}', this.value)"]`).value = oldName;
+                return;
+            }
+            
+            // 获取旧值
+            const oldValue = mappingData.get(oldName);
+            
+            // 创建新的 OrderedMap，更新键名但保持原有顺序
+            const newMappingData = new OrderedMap();
+            mappingData.entries().forEach(([key, value]) => {
+                if (key === oldName) {
+                    newMappingData.set(newName, oldValue);
+                } else {
+                    newMappingData.set(key, value);
+                }
+            });
+            
+            mappingData = newMappingData;
+            
+            // 更新 ALL_CHANNELS
+            ALL_CHANNELS = ALL_CHANNELS.map(chan => chan === oldName ? newName : chan);
+            
+            // 更新分类中的频道名
+            const newCategoryData = new OrderedMap();
+            categoryData.entries().forEach(([catName, channels]) => {
+                const newChannels = channels.map(chan => chan === oldName ? newName : chan);
+                newCategoryData.set(catName, newChannels);
+            });
+            categoryData = newCategoryData;
+            
+            renderChannelLibrary();
+            renderCategories();
+            renderMappings();
+            
+            mappingChanged = true;
+        }
+
+        /**
+         * 删除映射（保持顺序）
+         */
+        function deleteMapping(stdName) {
+            if (!confirm(`确定删除标准频道 "${stdName}" 的映射规则并移除频道库中的该频道吗？`)) {
+                return;
+            }
+            
+            // 创建新的 OrderedMap，排除要删除的键，保持原有顺序
+            const newMappingData = new OrderedMap();
+            mappingData.entries().forEach(([key, value]) => {
+                if (key !== stdName) {
+                    newMappingData.set(key, value);
+                }
+            });
+            mappingData = newMappingData;
+            
+            // 更新 ALL_CHANNELS
+            ALL_CHANNELS = ALL_CHANNELS.filter(chan => chan !== stdName);
+            
+            // 更新分类中的频道名
+            const newCategoryData = new OrderedMap();
+            categoryData.entries().forEach(([catName, channels]) => {
+                const newChannels = channels.filter(chan => chan !== stdName);
+                newCategoryData.set(catName, newChannels);
+            });
+            categoryData = newCategoryData;
+            
+            renderChannelLibrary();
+            renderCategories();
+            renderMappings();
+            
+            mappingChanged = true;
+        }
+
+        /**
+         * 打开添加映射弹窗
+         */
+        function openAddMappingModal() {
+            document.getElementById('addMappingModal').style.display = 'block';
+            document.getElementById('newMappingName').focus();
+        }
+
+        /**
+         * 关闭添加映射弹窗
+         */
+        function closeAddMappingModal(event) {
+            event.stopPropagation();
+            document.getElementById('addMappingModal').style.display = 'none';
+            document.getElementById('newMappingName').value = '';
+            document.getElementById('newMappingAliases').value = '';
+        }
+
+        /**
+         * 保存新映射规则（保持顺序）
+         */
+        function saveNewMapping(event) {
+            event.stopPropagation();
+            const stdName = document.getElementById('newMappingName').value.trim();
+            const aliasesStr = document.getElementById('newMappingAliases').value.trim();
+            
+            if (!stdName) {
+                alert('标准频道名不能为空');
+                return;
+            }
+            
+            if (mappingData.has(stdName)) {
+                alert(`标准频道名 "${stdName}" 已存在`);
+                return;
+            }
+            
+            if (!aliasesStr) {
+                alert('别名不能为空');
+                return;
+            }
+            
+            const aliases = aliasesStr.split(',').map(alias => alias.trim()).filter(alias => alias);
+            if (aliases.length === 0) {
+                alert('别名不能为空');
+                return;
+            }
+            
+            mappingData.set(stdName, aliases);
+            ALL_CHANNELS.push(stdName);
+            ALL_CHANNELS = [...new Set(ALL_CHANNELS)];
+            
+            renderChannelLibrary();
+            renderMappings();
+            closeAddMappingModal(event);
+            
+            mappingChanged = true;
+        }
+
+        // ===================== 事件绑定函数 =====================
+        function bindAllEvents() {
+            // 保存分类配置
+            document.getElementById('save-all').addEventListener('click', async function() {
+                const btn = this;
+                const originalText = btn.innerHTML;
+                
+                btn.disabled = true;
+                btn.innerHTML = '<span class="loading"></span>保存中...';
+
+                try {
+                    const configData = {
+                        categories: categoryData.toObject(), // 转换为带_order的对象
+                        mapping: mappingData.toObject(),     // 转换为带_order的对象
+                        third_party_urls: thirdPartyUrls,
+                        settings: {
+                            RUN_INTERVAL_HOURS: 2,
+                            FFMPEG_MAX_DETECT_TIME: 40,
+                            FFMPEG_TEST_DURATION: 15,
+                            RESPONSE_TIME_THRESHOLD: 10,
+                            STREAM_STABLE_THRESHOLD: 0.5,
+                            schedules: scheduleData  // 包含定时任务
+                        }
+                    };
+
+                    await callAPI('/api/config', 'POST', configData);
+                    alert('分类配置保存成功！');
+                    await loadAllConfigFromServer();
+                } catch (err) {
+                    console.error('保存失败:', err);
+                    alert('保存失败：' + err.message);
+                } finally {
+                    btn.disabled = false;
+                    btn.innerHTML = originalText;
+                }
+            });
+
+            // 保存映射配置
+            document.getElementById('save-mapping').addEventListener('click', async function() {
+                const btn = this;
+                const originalText = btn.innerHTML;
+                
+                btn.disabled = true;
+                btn.innerHTML = '<span class="loading"></span>保存中...';
+
+                try {
+                    const configData = {
+                        categories: categoryData.toObject(), // 转换为带_order的对象
+                        mapping: mappingData.toObject(),     // 转换为带_order的对象
+                        third_party_urls: thirdPartyUrls,
+                        settings: {
+                            RUN_INTERVAL_HOURS: 2,
+                            FFMPEG_MAX_DETECT_TIME: 40,
+                            FFMPEG_TEST_DURATION: 15,
+                            RESPONSE_TIME_THRESHOLD: 10,
+                            STREAM_STABLE_THRESHOLD: 0.5,
+                            schedules: scheduleData  // 包含定时任务
+                        }
+                    };
+
+                    await callAPI('/api/config', 'POST', configData);
+                    alert('映射配置保存成功！');
+                    mappingChanged = false;
+                    await loadAllConfigFromServer();
+                } catch (err) {
+                    console.error('保存失败:', err);
+                    alert('保存失败：' + err.message);
+                } finally {
+                    btn.disabled = false;
+                    btn.innerHTML = originalText;
+                }
+            });
+
+            // 绑定统一的基础配置保存按钮事件
+            document.getElementById('save-basic-config').addEventListener('click', saveAllBasicConfig);
+
+            // 绑定定时配置保存按钮事件
+            document.getElementById('save-schedule-btn').addEventListener('click', saveScheduleConfig);
+
+            // 绑定定时任务添加按钮事件
+            document.getElementById('add-schedule-btn').addEventListener('click', addNewSchedule);
+
+            // 添加分类
+            document.getElementById('add-category').addEventListener('click', () => {
+                let newCatName = '新分类';
+                let i = 1;
+                while (categoryData.has(newCatName)) {
+                    newCatName = `新分类${i}`;
+                    i++;
+                }
+                categoryData.set(newCatName, []);
+                activeCategoryName = newCatName;
+                renderCategories();
+                const newCard = document.querySelector(`.category-card[data-name="${newCatName}"]`);
+                newCard.querySelector('.category-name-input').focus();
+            });
+
+            // IP文件相关事件
+            document.getElementById('refreshIpBtn').addEventListener('click', initIpFiles);
+            document.getElementById('ipFileSelect').addEventListener('change', function() {
+                loadIpFile(this.value);
+            });
+            document.getElementById('newIpBtn').addEventListener('click', () => openNewFileModal('ip'));
+            document.getElementById('deleteIpBtn').addEventListener('click', () => deleteSelectedFile('ip'));
+
+            // RTP文件相关事件
+            document.getElementById('refreshRtpBtn').addEventListener('click', initRtpFiles);
+            document.getElementById('rtpFileSelect').addEventListener('change', function() {
+                loadRtpFile(this.value);
+            });
+            document.getElementById('newRtpBtn').addEventListener('click', () => openNewFileModal('rtp'));
+            document.getElementById('deleteRtpBtn').addEventListener('click', () => deleteSelectedFile('rtp'));
+
+            // 点击弹窗外部关闭弹窗
+            window.addEventListener('click', function(event) {
+                const mappingModal = document.getElementById('addMappingModal');
+                const fileModal = document.getElementById('newFileModal');
+                
+                if (event.target === mappingModal) {
+                    mappingModal.style.display = 'none';
+                }
+                if (event.target === fileModal) {
+                    fileModal.style.display = 'none';
+                }
+            });
+        }
+
+        // ===================== 键盘快捷键支持 =====================
+        document.addEventListener('keydown', function(e) {
+            // 登录界面回车登录
+            if (document.getElementById('loginModal').style.display === 'block') {
+                if (e.key === 'Enter') {
+                    if (document.getElementById('loginForm').style.display !== 'none') {
+                        handleLogin();
+                    } else if (document.getElementById('changePasswordForm').style.display !== 'none') {
+                        handleChangePassword();
+                    }
+                }
+            }
+        });
+
+        // 页面关闭前提示未保存的更改
+        window.addEventListener('beforeunload', function(e) {
+            if (!isAuthenticated) {
+                return;
+            }
+            
+            let unsavedChanges = false;
+            let message = '';
+            
+            if (mappingChanged) {
+                unsavedChanges = true;
+                message = '你有未保存的映射配置更改';
+            }
+            
+            if (scheduleChanged) {
+                unsavedChanges = true;
+                if (message) message += '和定时配置更改';
+                else message = '你有未保存的定时配置更改';
+            }
+            
+            if (unsavedChanges) {
+                const confirmationMessage = message + '，确定离开吗？';
+                (e || window.event).returnValue = confirmationMessage;
+                return confirmationMessage;
+            }
+        });
+    </script>
+</body>
+</html>

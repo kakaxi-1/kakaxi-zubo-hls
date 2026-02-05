@@ -1,0 +1,14 @@
+services:
+  iptv-server:
+    build: .
+    container_name: zubo
+    restart: unless-stopped
+    ports:
+      - "5020:5020"
+    volumes:
+      - ./config:/app/config
+      - /etc/localtime:/etc/localtime:ro
+    environment:
+      - PORT=5020
+      - CONFIG_FILE=/app/config/iptv_config.json
+      - TZ=Asia/Shanghai
