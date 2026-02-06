@@ -41,8 +41,8 @@ RUN pip install --no-cache-dir --upgrade pip && \
 COPY . .
 
 RUN mkdir -p /app/logs /app/hls /app/ip /app/rtp /app/web /app/config && \
-    echo '{}' > /app/config/iptv_config.json && \
-    chmod +x /app/start.sh
+    chown -R 1000:1000 /app && \
+    chmod -R 755 /app
 
 RUN find /app -name "*.pyc" -delete && \
     find /app -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
@@ -52,5 +52,7 @@ EXPOSE 5020
 ENV HLS_ROOT=/app/hls
 ENV PORT=5020
 ENV CONFIG_FILE=/app/config/iptv_config.json
+
+USER 1000:1000
 
 CMD ["/app/start.sh"]
