@@ -11,7 +11,6 @@ import glob
 from collections import OrderedDict, defaultdict
 from flask import Flask, request, jsonify, send_file, send_from_directory, Response
 from channel_manager import Channel, HLS_ROOT, GlobalThreadPool
-from client_limit import ClientLimiter
 from iptv_watcher import IPTVWatcher, load_iptv
 import iptv
 import pytz
@@ -40,6 +39,11 @@ PASSWORD_FILE = os.path.join(BASE_DIR, "web_password.json")
 
 app = Flask(__name__, static_folder="web", static_url_path="/web")
 
+ACTIVE_WINDOW = 8
+MIN_UPTIME = 13
+IP_CLEAN_INTERVAL = 2
+CHANNEL_CHECK_INTERVAL = 3
+
 class ServiceManager:
     _instance = None
     _lock = threading.RLock()
@@ -55,9 +59,8 @@ class ServiceManager:
                 if not hasattr(self, '_initialized'):
                     self._initialized = True
                     self.manager = None
-                    self.limiter = None
                     self.global_cleaner = None
-                    self.ip_tracker = None
+                    self.ip_activity_manager = None
                     self._watchdog_observer = None
                     self._is_shutting_down = False
     
@@ -80,18 +83,13 @@ class ServiceManager:
                     except Exception as e:
                         continue
                 
-                self.ip_tracker = BoundedIPAccessTracker()
+                self.ip_activity_manager = IPActivityManager()
                 
-                self.manager = ChannelManager(channels, self.ip_tracker)
+                self.manager = ChannelManager(channels, self.ip_activity_manager)
 
-                self.ip_tracker.set_channel_manager(self.manager)
+                self.ip_activity_manager.start_cleanup_thread()
                 
                 self.global_cleaner = GlobalCleaner()
-                
-                try:
-                    self.limiter = ClientLimiter()
-                except ImportError:
-                    self.limiter = None
                 
                 self._start_watchdog()
                 
@@ -122,10 +120,6 @@ class ServiceManager:
                 self.initialize()
             return self.manager
     
-    def get_limiter(self):
-        with self._lock:
-            return self.limiter
-    
     def get_cleaner(self):
         with self._lock:
             return self.global_cleaner
@@ -141,6 +135,13 @@ class ServiceManager:
                 except:
                     pass
                 self._watchdog_observer = None
+            
+            if self.ip_activity_manager:
+                try:
+                    self.ip_activity_manager.stop()
+                except:
+                    pass
+                self.ip_activity_manager = None
             
             if self.manager:
                 try:
@@ -161,157 +162,85 @@ class ServiceManager:
             except:
                 pass
 
-class BoundedIPAccessTracker:
-    def __init__(self, max_ips_per_channel=1000, max_channels_per_ip=10, timeout=10):
-        self.max_ips_per_channel = max_ips_per_channel
-        self.max_channels_per_ip = max_channels_per_ip
-        self.timeout = timeout
-        
-        self.channel_ips = defaultdict(lambda: OrderedDict())
-        self.ip_channels = defaultdict(lambda: OrderedDict())
-        self.last_access = {}
-        
-        self.channel_manager = None
-        
+
+class IPActivityManager:
+    """IP 活跃管理器"""
+    def __init__(self):
+        self.channel_activities = {}  # channel_name -> {ip: last_seen_ts}
         self.lock = threading.RLock()
+        self._cleanup_thread = None
+        self._running = False
+    
+    def record_access(self, ip, channel_name):
+        """记录 IP 对频道的访问"""
+        current_time = time.time()
         
+        with self.lock:
+            if channel_name not in self.channel_activities:
+                self.channel_activities[channel_name] = {}
+            
+            self.channel_activities[channel_name][ip] = current_time
+    
+    def get_active_ips(self, channel_name):
+        """获取频道的活跃 IP"""
+        current_time = time.time()
+        active_ips = {}
+        
+        with self.lock:
+            if channel_name in self.channel_activities:
+                for ip, last_seen in self.channel_activities[channel_name].items():
+                    if current_time - last_seen <= ACTIVE_WINDOW:
+                        active_ips[ip] = last_seen
+        
+        return active_ips
+    
+    def is_channel_active(self, channel_name):
+        """检查频道是否有活跃 IP"""
+        return len(self.get_active_ips(channel_name)) > 0
+    
+    def cleanup_expired_ips(self):
+        """清理过期 IP"""
+        current_time = time.time()
+        
+        with self.lock:
+            for channel_name in list(self.channel_activities.keys()):
+                if channel_name in self.channel_activities:
+                    expired_ips = []
+                    for ip, last_seen in self.channel_activities[channel_name].items():
+                        if current_time - last_seen > ACTIVE_WINDOW:
+                            expired_ips.append(ip)
+                    
+                    for ip in expired_ips:
+                        del self.channel_activities[channel_name][ip]
+                    
+                    if not self.channel_activities[channel_name]:
+                        del self.channel_activities[channel_name]
+    
+    def start_cleanup_thread(self):
+        """启动 IP 清理线程"""
+        self._running = True
         self._cleanup_thread = threading.Thread(
             target=self._cleanup_loop,
-            daemon=True
+            daemon=True,
+            name="IPCleaner"
         )
         self._cleanup_thread.start()
     
-    def set_channel_manager(self, manager):
-        self.channel_manager = manager
-    
-    def _enforce_limits(self, ip, channel_name):
-        with self.lock:
-            if len(self.channel_ips[channel_name]) >= self.max_ips_per_channel:
-                oldest_ip, _ = self.channel_ips[channel_name].popitem(last=False)
-                if oldest_ip in self.ip_channels:
-                    self.ip_channels[oldest_ip].pop(channel_name, None)
-                    if not self.ip_channels[oldest_ip]:
-                        del self.ip_channels[oldest_ip]
-            
-            if len(self.ip_channels[ip]) >= self.max_channels_per_ip:
-                oldest_channel, _ = self.ip_channels[ip].popitem(last=False)
-                if oldest_channel in self.channel_ips:
-                    self.channel_ips[oldest_channel].pop(ip, None)
-                    if not self.channel_ips[oldest_channel]:
-                        del self.channel_ips[oldest_channel]
-    
-    def record_access(self, ip, channel_name):
-        with self.lock:
-            try:
-                current_time = time.time()
-                key = (ip, channel_name)
-                self.last_access[key] = current_time
-                
-                self._enforce_limits(ip, channel_name)
-                
-                self.channel_ips[channel_name][ip] = current_time
-                self.ip_channels[ip][channel_name] = current_time
-                
-            except Exception as e:
-                pass
-    
-    def remove_ip(self, ip, channel_name=None):
-        with self.lock:
-            try:
-                if channel_name:
-                    key = (ip, channel_name)
-                    if key in self.last_access:
-                        del self.last_access[key]
-                    
-                    if channel_name in self.channel_ips:
-                        self.channel_ips[channel_name].pop(ip, None)
-                        if not self.channel_ips[channel_name]:
-                            del self.channel_ips[channel_name]
-                    
-                    if ip in self.ip_channels:
-                        self.ip_channels[ip].pop(channel_name, None)
-                        if not self.ip_channels[ip]:
-                            del self.ip_channels[ip]
-                else:
-                    if ip in self.ip_channels:
-                        channels = list(self.ip_channels[ip].keys())
-                        for ch in channels:
-                            self.remove_ip(ip, ch)
-            except Exception as e:
-                pass
-    
-    def is_active(self, channel_name):
-        with self.lock:
-            try:
-                current_time = time.time()
-                active_count = 0
-                
-                if channel_name in self.channel_ips:
-                    ips_to_remove = []
-                    for ip, last_time in list(self.channel_ips[channel_name].items()):
-                        if current_time - last_time <= self.timeout:
-                            active_count += 1
-                        else:
-                            ips_to_remove.append(ip)
-                    
-                    for ip in ips_to_remove:
-                        self.remove_ip(ip, channel_name)
-                
-                return active_count > 0
-            except Exception as e:
-                return False
-    
-    def _force_stop_channel(self, channel_name):
-        """强制停止频道"""
-        with self.lock:
-            if channel_name in self.channel_ips:
-                current_time = time.time()
-                for ip in list(self.channel_ips[channel_name].keys()):
-                    self.remove_ip(ip, channel_name)
-                
-                if self.channel_manager:
-                    ch = self.channel_manager.channels.get(channel_name)
-                    if ch and ch.state in [ch.STATE_RUNNING, ch.STATE_STARTING]:
-                        ch._stop_stream()
-    
-    def get_active_count(self, channel_name):
-        with self.lock:
-            current_time = time.time()
-            count = 0
-            
-            if channel_name in self.channel_ips:
-                for ip, last_time in list(self.channel_ips[channel_name].items()):
-                    if current_time - last_time <= self.timeout:
-                        count += 1
-            
-            return count
-    
     def _cleanup_loop(self):
-        while True:
-            time.sleep(30)
+        """IP 清理循环"""
+        while self._running:
             try:
-                with self.lock:
-                    current_time = time.time()
-                    expired_keys = []
-                    
-                    for (ip, channel), last_time in list(self.last_access.items()):
-                        if current_time - last_time > self.timeout:
-                            expired_keys.append((ip, channel))
-                    
-                    for ip, channel in expired_keys:
-                        self.remove_ip(ip, channel)
-                    
-            except Exception as e:
+                self.cleanup_expired_ips()
+            except Exception:
                 pass
+            time.sleep(IP_CLEAN_INTERVAL)
     
-    def _force_check_channel(self, channel):
-        try:
-            if channel.active_checker:
-                should_be_active = channel.active_checker.is_active(channel.name)
-                if not should_be_active and channel.state in [channel.STATE_RUNNING, channel.STATE_STARTING]:
-                    channel._stop_stream()
-        except Exception:
-            pass
+    def stop(self):
+        """停止清理线程"""
+        self._running = False
+        if self._cleanup_thread and self._cleanup_thread.is_alive():
+            self._cleanup_thread.join(timeout=2)
+
 
 class GlobalCleaner:
     def __init__(self, check_interval=3600):
@@ -448,7 +377,7 @@ def standard_response(code, msg, data=None):
 def validate_filename(filename):
     if not filename:
         return False
-    if not filename.ends_with('.txt'):
+    if not filename.endswith('.txt'):
         return False
     name_only = filename[:-4]
     return bool(re.match(r'^[a-zA-Z0-9_\-\u4e00-\u9fa5]+$', name_only))
@@ -525,63 +454,46 @@ def _is_channel_ready(ch):
     except:
         return False
 
+
 class ChannelManager:
-    def __init__(self, channels, ip_tracker):
+    def __init__(self, channels, ip_activity_manager):
         self.channels = channels
         self.lock = threading.RLock()
-        self.ip_tracker = ip_tracker
+        self.ip_activity_manager = ip_activity_manager
         
         for name, ch in self.channels.items():
-            def make_checker(channel_name):
-                class Checker:
-                    def __init__(self, tracker):
-                        self.tracker = tracker
-                    def is_active(self, _):
-                        return self.tracker.is_active(channel_name)
-                return Checker(self.ip_tracker)
+            ch.set_ip_activity_manager(ip_activity_manager)
             
-            checker = make_checker(name)
-            ch.set_active_checker(checker)
+            ch.start_check_thread()
     
-    def quick_touch(self, channel_name, client_ip=None):
-        with self.lock:
-            ch = self.channels.get(channel_name)
-            if not ch:
-                return False
-
-            if client_ip:
-                try:
-                    self.ip_tracker.record_access(client_ip, channel_name)
-                except:
-                    pass
-            
-            ch.touch()
-            return True
+    def record_ip_activity(self, channel_name, client_ip):
+        """记录 IP 活跃时间"""
+        if client_ip and self.ip_activity_manager:
+            self.ip_activity_manager.record_access(client_ip, channel_name)
     
     def touch(self, channel_name, client_ip=None):
+        """触摸频道"""
         with self.lock:
             ch = self.channels.get(channel_name)
             if not ch:
                 return False
             
             if client_ip:
-                try:
-                    self.ip_tracker.record_access(client_ip, channel_name)
-                except:
-                    pass
+                self.record_ip_activity(channel_name, client_ip)
             
-            ch.touch()
+            result = ch.touch()
             
             return True
-    
-    def release(self, channel_name, client_ip=None):
-        pass
     
     def get_channel_status(self, channel_name):
         with self.lock:
             ch = self.channels.get(channel_name)
             if not ch:
                 return None
+            
+            active_ips = {}
+            if self.ip_activity_manager:
+                active_ips = self.ip_activity_manager.get_active_ips(channel_name)
             
             status = {
                 'name': ch.name,
@@ -590,8 +502,10 @@ class ChannelManager:
                 'last_touch': ch.last_touch_time,
                 'hls_ready': ch.hls_ready if hasattr(ch, 'hls_ready') else False,
                 'hls_ready_time': ch.hls_ready_time if hasattr(ch, 'hls_ready_time') else 0,
-                'active_clients': self.ip_tracker.get_active_count(channel_name) if hasattr(self.ip_tracker, 'get_active_count') else 0,
-                'sources_count': len(ch.sources) if hasattr(ch, 'sources') else 0
+                'active_clients': len(active_ips),
+                'sources_count': len(ch.sources) if hasattr(ch, 'sources') else 0,
+                'start_time': ch.start_time if hasattr(ch, 'start_time') else 0,
+                'last_active_ts': ch.last_active_ts if hasattr(ch, 'last_active_ts') else 0
             }
             
             return status
@@ -606,8 +520,8 @@ class ChannelManager:
                 ch = self.channels[name]
                 ch.cleanup()
                 del self.channels[name]
-                if self.ip_tracker:
-                    self.ip_tracker.remove_ip(None, name)
+                if self.ip_activity_manager and name in self.ip_activity_manager.channel_activities:
+                    del self.ip_activity_manager.channel_activities[name]
             
             for name, sources in new_data.items():
                 if name in self.channels:
@@ -615,18 +529,8 @@ class ChannelManager:
                 else:
                     try:
                         ch = Channel(name, list(sources))
-                        
-                        def make_checker(channel_name):
-                            class Checker:
-                                def __init__(self, tracker):
-                                    self.tracker = tracker
-                                def is_active(self, _):
-                                    return self.tracker.is_active(channel_name)
-                            return Checker(self.ip_tracker)
-                        
-                        checker = make_checker(name)
-                        ch.set_active_checker(checker)
-                        
+                        ch.set_ip_activity_manager(self.ip_activity_manager)
+                        ch.start_check_thread()
                         self.channels[name] = ch
                     except Exception as e:
                         pass
@@ -639,21 +543,7 @@ class ChannelManager:
                 except Exception as e:
                     pass
             self.channels.clear()
-    
-    def _force_stop_channel(self, channel_name):
-        """强制停止频道"""
-        with self.lock:
-            ch = self.channels.get(channel_name)
-            if not ch:
-                return
-            
-            ch._stop_stream()
-            
-            if self.ip_tracker:
-                self.ip_tracker.remove_ip(None, channel_name)
-            
-            time.sleep(0.5)
-            ch._clean_hls_immediate()
+
 
 def execute_scheduled_update():
     """执行定时更新任务"""
@@ -690,7 +580,7 @@ def execute_scheduled_update():
 
 def start_beijing_scheduler():
     """
-    不依赖 schedule 的稳定北京时间调度器
+    北京时间调度器
     """
     print("🕒 启动北京时间调度器")
 
@@ -721,7 +611,7 @@ def start_beijing_scheduler():
                     run_key = f"{today}_{time_str}"
 
                     if current_hm == time_str and run_key not in last_run:
-                        print(f"⏰ 命中定时任务 {time_str}（北京时间）")
+                        print(f"⏰ 命中定时任务 {time_str}")
                         execute_scheduled_update()
                         last_run.add(run_key)
 
@@ -741,6 +631,7 @@ def start_beijing_scheduler():
         name="BeijingScheduler"
     )
     t.start()
+
 
 @app.route("/")
 def index():
@@ -810,12 +701,12 @@ def serve_hls(channel_path):
         return "路径错误", 403
     
     is_m3u8 = filename.endswith(".m3u8")
+
+    if client_ip:
+        manager.record_ip_activity(channel_name, client_ip)
     
     if is_m3u8:
-        if client_ip and manager.ip_tracker:
-            manager.ip_tracker.record_access(client_ip, channel_name)
-        
-        success = _ensure_channel_ready(channel_name, manager)
+        success = _ensure_channel_ready(channel_name, manager, client_ip)
         
         if not success:
             return Response(
@@ -835,22 +726,24 @@ def serve_hls(channel_path):
     if not os.path.exists(file_path):
         return "文件不存在", 404
     
+    if client_ip:
+        manager.record_ip_activity(channel_name, client_ip)
+    
     return _serve_file_directly(file_path, "ts")
 
-def _ensure_channel_ready(channel_name, manager):
+def _ensure_channel_ready(channel_name, manager, client_ip=None):
     """确保频道就绪，返回True表示频道可以播放"""
     ch = manager.channels.get(channel_name)
     if not ch:
         return False
     
-    with manager.lock:
-        for name, other_ch in manager.channels.items():
-            if name != channel_name and other_ch.state in [other_ch.STATE_RUNNING, other_ch.STATE_STARTING]:
-                manager._force_stop_channel(name)
+    if client_ip:
+        manager.record_ip_activity(channel_name, client_ip)
     
     result = ch.touch()
     
     return result
+
 
 def load_password():
     default_password = {
@@ -1461,13 +1354,19 @@ def get_all_channels_status():
         with manager.lock:
             status_list = []
             for name, ch in manager.channels.items():
+                active_ips = {}
+                if manager.ip_activity_manager:
+                    active_ips = manager.ip_activity_manager.get_active_ips(name)
+                
                 status = {
                     'name': name,
                     'state': ch.state,
                     'has_checker': ch.active_checker is not None,
                     'sources_count': len(ch.sources) if hasattr(ch, 'sources') else 0,
-                    'active_clients': manager.ip_tracker.get_active_count(name) if hasattr(manager.ip_tracker, 'get_active_count') else 0,
-                    'hls_ready': ch.hls_ready if hasattr(ch, 'hls_ready') else False
+                    'active_clients': len(active_ips),
+                    'hls_ready': ch.hls_ready if hasattr(ch, 'hls_ready') else False,
+                    'start_time': ch.start_time if hasattr(ch, 'start_time') else 0,
+                    'last_active_ts': ch.last_active_ts if hasattr(ch, 'last_active_ts') else 0
                 }
                 status_list.append(status)
             
@@ -1478,7 +1377,21 @@ def get_all_channels_status():
     except Exception as e:
         return jsonify(standard_response(-1, f"获取频道状态失败: {str(e)}"))
 
+def kill_orphan_ffmpeg():
+    """启动时清理残留的 ffmpeg 进程"""
+    if sys.platform.startswith('linux') or sys.platform == 'darwin':
+        try:
+            subprocess.run(["pkill", "-9", "ffmpeg"], capture_output=True)
+        except:
+            pass
+    elif sys.platform.startswith('win'):
+        try:
+            subprocess.run(["taskkill", "/F", "/IM", "ffmpeg.exe"], capture_output=True)
+        except:
+            pass
+
 def init_services():
+    kill_orphan_ffmpeg()
     try:
         required_dirs = [HLS_DIR, WEB_DIR, LOG_DIR]
         for dir_path in required_dirs:
