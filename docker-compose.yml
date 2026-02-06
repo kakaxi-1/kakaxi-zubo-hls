@@ -7,8 +7,12 @@ services:
       - "5020:5020"
     volumes:
       - ./config:/app/config
+      - ./ip:/app/ip
       - /etc/localtime:/etc/localtime:ro
     environment:
       - PORT=5020
       - CONFIG_FILE=/app/config/iptv_config.json
-      - TZ=Asia/Shanghai
+      - BASE_DIR=/app
+      - HLS_ROOT=/app/hls
+      - LOG_DIR=/app/logs
+    user: "1000:1000"
