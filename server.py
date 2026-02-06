@@ -21,8 +21,10 @@ def get_beijing_time():
     """获取北京时间"""
     return datetime.now(SHANGHAI_TZ)
 
-BASE_DIR = os.getenv("BASE_DIR", os.path.dirname(os.path.abspath(__file__)))
-CONFIG_FILE = os.getenv("CONFIG_FILE", os.path.join(BASE_DIR, "iptv_config.json"))
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+CONFIG_FILE = os.getenv("CONFIG_FILE")
+if not CONFIG_FILE:
+    CONFIG_FILE = os.path.join(BASE_DIR, "iptv_config.json")
 
 os.environ['BASE_DIR'] = BASE_DIR
 os.environ['CONFIG_FILE'] = CONFIG_FILE
