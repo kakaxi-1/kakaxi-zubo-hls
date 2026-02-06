@@ -19,6 +19,7 @@ Any commercial use requires prior written permission from the author.
 
 ## Docker
 
+```yaml
 docker run -d \
   --name zubo \
   --restart unless-stopped \
@@ -34,7 +35,6 @@ docker run -d \
 
 ## Docker Compose
 
-```yaml
 services:
   iptv-server:
     image: kakaxi088/zubo:latest
