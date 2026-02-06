@@ -25,10 +25,7 @@ docker run -d \
   --name zubo \
   --restart unless-stopped \
   -p 5020:5020 \
-  -v $(pwd)/config:/app/config \
-  -v /etc/localtime:/etc/localtime:ro \
   -e PORT=5020 \
-  -e CONFIG_FILE=/app/config/iptv_config.json \
   -e TZ=Asia/Shanghai \
   kakaxi088/zubo:latest
 
