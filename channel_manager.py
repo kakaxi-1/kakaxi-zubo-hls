@@ -7,15 +7,16 @@ import shutil
 import requests
 import urllib3
 import queue
-import re
-import io
-import select
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 HLS_ROOT = os.getenv("HLS_ROOT", "hls")
+
+ACTIVE_WINDOW = 8
+MIN_UPTIME = 13
+CHANNEL_CHECK_INTERVAL = 3
 
 _global_executor = None
 
@@ -83,7 +84,7 @@ class GlobalThreadPool:
     def shutdown_all(cls):
         if cls._instance:
             cls._instance.shutdown()
-
+    
     @classmethod
     def shutdown(cls):
         cls.shutdown_all()
@@ -107,6 +108,7 @@ def shutdown_global_pool():
         _global_executor.shutdown(wait=True)
         _global_executor = None
 
+
 class Channel:
     STATE_IDLE = "IDLE"
     STATE_STARTING = "STARTING"
@@ -118,7 +120,7 @@ class Channel:
         self.name = name
         self.sources = list(sources)
         self.lock = threading.Lock()
-        self.active_checker = None
+        self.ip_activity_manager = None
         self.proc = None
         
         self.state = self.STATE_IDLE
@@ -128,11 +130,6 @@ class Channel:
         self.stream_thread = None
         self.check_thread = None
         self.check_running = False
-        self.check_interval = 5
-        self.cleanup_timer = None
-        self.cleanup_delay = 20
-        self.session_id = None
-        self.last_touch_time = 0
         
         self.hls_ready = False
         self.hls_ready_time = 0
@@ -140,6 +137,9 @@ class Channel:
         self.race_concurrency = 3
         self.executor = ThreadPoolExecutor(max_workers=10)
         self.current_source_index = 0
+        
+        self.start_time = 0
+        self.last_active_ts = 0
         
         self.data_queue = None
         self.writer_thread = None
@@ -195,6 +195,8 @@ class Channel:
         )
         self.session.mount('http://', adapter)
         self.session.mount('https://', adapter)
+        
+        self.last_touch_time = 0
 
     def _pipeline_dead(self):
         if not self.pipeline_ready:
@@ -211,16 +213,13 @@ class Channel:
         
         return False
 
-    def set_active_checker(self, checker):
+    def set_ip_activity_manager(self, manager):
+        """设置 IP 活动管理器"""
         with self.lock:
-            self.active_checker = checker
-            if checker:
-                self._start_check_thread()
+            self.ip_activity_manager = manager
     
-    def _start_check_thread(self):
-        if self.active_checker is None:
-            return
-        
+    def start_check_thread(self):
+        """启动频道检查线程"""
         if self.check_thread is None or not self.check_thread.is_alive():
             self.check_running = True
             self.check_thread = threading.Thread(
@@ -231,82 +230,74 @@ class Channel:
             self.check_thread.start()
     
     def _check_loop(self):
-        last_check_time = 0
-        
+        """频道检查循环"""
         while self.check_running:
-            current_time = time.time()
-            need_check = False
-            
-            with self.lock:
-                if self.state == self.STATE_RUNNING and current_time - self.last_touch_time > 30:
-                    need_check = True
-            
-            if not need_check and (current_time - last_check_time >= self.check_interval):
-                need_check = True
-            
-            if need_check:
-                try:
-                    self._safe_check_and_manage()
-                    last_check_time = current_time
-                except Exception as e:
-                    pass
-            
-            time.sleep(self.check_interval)
+            try:
+                self._check_and_manage()
+            except Exception:
+                pass
+            time.sleep(CHANNEL_CHECK_INTERVAL)
     
-    def _safe_check_and_manage(self):
-        if not self.active_checker: return
-        
-        should_be_active = self.active_checker.is_active(self.name)
+    def _check_and_manage(self):
+        """检查和管理频道状态"""
+        current_time = time.time()
         
         with self.lock:
-            if self.state == self.STATE_RUNNING and should_be_active:
-                if not self._check_hls_files_exist():
-                    self._stop_stream()
-                    return
-                if not self._check_ts_size():
-                    self._stop_stream()
-                    return
+            should_stop = False
             
-            if should_be_active and self.state in [self.STATE_IDLE, self.STATE_STOPPED]:
-                self._start_stream()
-            elif not should_be_active and self.state == self.STATE_RUNNING:
-                self._stop_stream_with_delay()
+            if self.state in [self.STATE_RUNNING, self.STATE_STARTING]:
+                has_active_ips = False
+                if self.ip_activity_manager:
+                    has_active_ips = self.ip_activity_manager.is_channel_active(self.name)
+                
+                if not has_active_ips:
+                    inactive_time = current_time - self.last_active_ts if self.last_active_ts > 0 else float('inf')
+                    uptime = current_time - self.start_time if self.start_time > 0 else 0
+                    
+                    if inactive_time >= ACTIVE_WINDOW and uptime >= MIN_UPTIME:
+                        should_stop = True
+            
+            if should_stop:
+                self._safe_stop_stream()
+            elif self.state in [self.STATE_IDLE, self.STATE_STOPPED]:
+                if self.ip_activity_manager and self.ip_activity_manager.is_channel_active(self.name):
+                    self._start_stream()
     
-    def _stop_stream_with_delay(self):
-        def delayed_stop():
-            time.sleep(3)
-            with self.lock:
-                if self.state == self.STATE_RUNNING and self.active_checker and not self.active_checker.is_active(self.name):
-                    self._stop_stream()
-                    time.sleep(2)
-                    self._clean_hls_if_inactive()
+    def _safe_stop_stream(self):
+        """安全停止流"""
+        if self.state == self.STATE_STOPPED:
+            return
         
-        threading.Thread(target=delayed_stop, daemon=True).start()
-    
-    def _clean_hls_if_inactive(self):
-        if self.state == self.STATE_STOPPED and self.active_checker and not self.active_checker.is_active(self.name):
+        old_state = self.state
+        self.state = self.STATE_STOPPING
+        
+        self._stop_data_pipeline()
+        self._stop_ffmpeg_log_thread()
+        self._kill_ffmpeg()
+        
+        if old_state in [self.STATE_RUNNING, self.STATE_STARTING]:
             self._clean_hls_immediate()
-    
-    def _check_hls_files_exist(self):
-        m3u8_path = os.path.join(self.output_dir, "index.m3u8")
-        if not os.path.exists(m3u8_path):
-            return False
         
-        try:
-            ts_files = glob.glob(os.path.join(self.output_dir, "seg_*.ts"))
-            return len(ts_files) > 0
-        except:
-            return False
+        self.state = self.STATE_STOPPED
+        self.start_time = 0
+        self.last_active_ts = 0
+        self.hls_ready = False
+        self.pipeline_started = False
+        self.pipeline_ready = False
     
-    def stop_check_thread(self):
-        self.check_running = False
-        if self.check_thread and self.check_thread.is_alive():
-            self.check_thread.join(timeout=2)
-        self.check_thread = None
+    def _stop_ffmpeg_log_thread(self):
+        self.ffmpeg_log_running = False
+        if self.ffmpeg_log_thread and self.ffmpeg_log_thread.is_alive():
+            self.ffmpeg_log_thread.join(timeout=1)
+        self.ffmpeg_log_thread = None
     
     def touch(self):
+        """触摸频道"""
+        current_time = time.time()
+        
         with self.lock:
-            self.last_touch_time = time.time()
+            self.last_touch_time = current_time
+            self.last_active_ts = current_time
             
             if self.state == self.STATE_RUNNING:
                 if self._check_hls_ready():
@@ -314,7 +305,7 @@ class Channel:
                 else:
                     return self._wait_for_hls_ready(timeout=5)
             
-            if self.active_checker and self.active_checker.is_active(self.name):
+            if self.state in [self.STATE_IDLE, self.STATE_STOPPED]:
                 self._start_stream()
                 return self._wait_for_hls_ready(timeout=15)
             
@@ -334,18 +325,23 @@ class Channel:
         return False
     
     def _check_hls_ready(self):
-        if self.state != self.STATE_RUNNING: return False
-        if self.proc is None or self.proc.poll() is not None: return False
+        if self.state != self.STATE_RUNNING: 
+            return False
+        if self.proc is None or self.proc.poll() is not None: 
+            return False
         
         m3u8_path = os.path.join(self.output_dir, "index.m3u8")
-        if not os.path.exists(m3u8_path): return False
+        if not os.path.exists(m3u8_path): 
+            return False
         
         try:
             ts_files = glob.glob(os.path.join(self.output_dir, "seg_*.ts"))
-            if len(ts_files) < 1: return False
+            if len(ts_files) < 1: 
+                return False
             
             latest_ts = max(ts_files, key=os.path.getmtime)
-            if os.path.getsize(latest_ts) < 10 * 1024: return False
+            if os.path.getsize(latest_ts) < 10 * 1024: 
+                return False
             
             return True
         except:
@@ -749,12 +745,9 @@ class Channel:
             return
         
         self.state = self.STATE_STARTING
-        self.session_id = f"{int(time.time())}_{id(self)}"
+        self.start_time = time.time()
+        self.last_active_ts = time.time()
         self.hls_ready = False
-        
-        if self.cleanup_timer:
-            self.cleanup_timer.cancel()
-            self.cleanup_timer = None
         
         if self.stream_thread is None or not self.stream_thread.is_alive():
             self.stream_thread = threading.Thread(
@@ -764,40 +757,8 @@ class Channel:
             )
             self.stream_thread.start()
     
-    def _stop_stream(self):
-        if self.state == self.STATE_STOPPED:
-            return
-        
-        old_state = self.state
-        self.state = self.STATE_STOPPING
-        
-        self.stop_check_thread()
-        
-        self._stop_data_pipeline()
-        
-        self._stop_ffmpeg_log_thread()
-        
-        self._kill_ffmpeg()
-        
-        if old_state in [self.STATE_RUNNING, self.STATE_STARTING]:
-            self._clean_hls_immediate()
-        
-        self.state = self.STATE_STOPPED
-        self.session_id = None
-        self.last_touch_time = 0
-        self.hls_ready = False
-        self.pipeline_started = False
-        self.pipeline_ready = False
-
-    def _stop_ffmpeg_log_thread(self):
-        self.ffmpeg_log_running = False
-        if self.ffmpeg_log_thread and self.ffmpeg_log_thread.is_alive():
-            self.ffmpeg_log_thread.join(timeout=1)
-        self.ffmpeg_log_thread = None
-
     def _streaming_loop(self):
         self.state = self.STATE_STARTING
-        current_session = self.session_id
         
         if not self.sources:
             self.state = self.STATE_STOPPED
@@ -811,7 +772,7 @@ class Channel:
         self.state = self.STATE_RUNNING
         
         try:
-            while self.state == self.STATE_RUNNING and self.session_id == current_session:
+            while self.state == self.STATE_RUNNING:
                 if self.proc is None or self.proc.poll() is not None:
                     break
                 
@@ -828,22 +789,47 @@ class Channel:
                 self.state = self.STATE_STOPPING
                 
                 self._stop_data_pipeline()
-                
                 self._stop_ffmpeg_log_thread()
-                
                 self._kill_ffmpeg()
                 
                 self.state = self.STATE_STOPPED
+                self.start_time = 0
+                self.last_active_ts = 0
     
-    def _delayed_clean_hls(self):
+    def _kill_ffmpeg(self):
+        if not self.proc:
+            return
+        
         try:
-            if self.active_checker and self.active_checker.is_active(self.name):
-                return
-            self._clean_hls_immediate()
+            if self.proc.stdin:
+                try:
+                    self.proc.stdin.close()
+                except:
+                    pass
+            
+            time.sleep(0.1)
+            
+            self.proc.terminate()
+            
+            try:
+                self.proc.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                self.proc.kill()
+                try:
+                    self.proc.wait(timeout=2)
+                except:
+                    pass
+            
         except Exception:
             pass
         finally:
-            self.cleanup_timer = None
+            self.proc = None
+    
+    def stop_check_thread(self):
+        self.check_running = False
+        if self.check_thread and self.check_thread.is_alive():
+            self.check_thread.join(timeout=2)
+        self.check_thread = None
     
     def cleanup(self):
         self.stop_check_thread()
@@ -852,6 +838,8 @@ class Channel:
         self._kill_ffmpeg()
         
         self.state = self.STATE_STOPPED
+        self.start_time = 0
+        self.last_active_ts = 0
         
         try:
             self.session.close()
@@ -866,45 +854,28 @@ class Channel:
         except:
             pass
     
-    def _clean_hls_safe(self):
-        if not os.path.exists(self.output_dir):
-            return
-        
-        if self.active_checker and self.active_checker.is_active(self.name):
+    def _clean_hls_immediate(self):
+        if not os.path.exists(self.output_dir): 
             return
         
         try:
-            if self.state == self.STATE_RUNNING:
-                return
-                
-            m3u8_path = os.path.join(self.output_dir, "index.m3u8")
-            if os.path.exists(m3u8_path):
-                mtime = os.path.getmtime(m3u8_path)
-                current_time = time.time()
-                
-                if mtime > current_time:
-                    return
-                    
-                if abs(current_time - mtime) < 30:
-                    return
+            for file in os.listdir(self.output_dir):
+                file_path = os.path.join(self.output_dir, file)
+                try:
+                    if os.path.isfile(file_path):
+                        os.unlink(file_path)
+                    elif os.path.isdir(file_path):
+                        shutil.rmtree(file_path, ignore_errors=True)
+                except:
+                    pass
+            
+            try:
+                if not os.listdir(self.output_dir):
+                    os.rmdir(self.output_dir)
+            except:
+                pass
         except:
             pass
-        
-        self._clean_hls_immediate()
-    
-    def _check_ts_size(self):
-        try:
-            ts_files = glob.glob(os.path.join(self.output_dir, "seg_*.ts"))
-            if not ts_files:
-                if self.proc_start_time == 0: return True
-                return (time.time() - self.proc_start_time) < 5
-            
-            latest_ts = max(ts_files, key=os.path.getmtime)
-            mtime = os.path.getmtime(latest_ts)
-            if time.time() - mtime > 3: return False
-            return True
-        except:
-            return True
     
     def _start_ffmpeg(self, clean_old_files=True):
         os.makedirs(self.output_dir, exist_ok=True)
@@ -949,35 +920,6 @@ class Channel:
             self.proc = None
             return False
     
-    def _kill_ffmpeg(self):
-        if not self.proc:
-            return
-        
-        try:
-            if self.proc.stdin:
-                try:
-                    self.proc.stdin.close()
-                except:
-                    pass
-            
-            time.sleep(0.1)
-            
-            self.proc.terminate()
-            
-            try:
-                self.proc.wait(timeout=2)
-            except subprocess.TimeoutExpired:
-                self.proc.kill()
-                try:
-                    self.proc.wait(timeout=2)
-                except:
-                    pass
-            
-        except Exception:
-            pass
-        finally:
-            self.proc = None
-    
     def _clean_old_ts_files(self):
         try:
             for file in glob.glob(os.path.join(self.output_dir, "seg_*.ts")):
@@ -988,31 +930,5 @@ class Channel:
             m3u8_file = os.path.join(self.output_dir, "index.m3u8")
             if os.path.exists(m3u8_file):
                 os.remove(m3u8_file)
-        except:
-            pass
-
-    def _clean_hls(self):
-        self._clean_hls_immediate()
-    
-    def _clean_hls_immediate(self):
-        if not os.path.exists(self.output_dir): 
-            return
-        
-        try:
-            for file in os.listdir(self.output_dir):
-                file_path = os.path.join(self.output_dir, file)
-                try:
-                    if os.path.isfile(file_path):
-                        os.unlink(file_path)
-                    elif os.path.isdir(file_path):
-                        shutil.rmtree(file_path, ignore_errors=True)
-                except:
-                    pass
-            
-            try:
-                if not os.listdir(self.output_dir):
-                    os.rmdir(self.output_dir)
-            except:
-                pass
         except:
             pass
