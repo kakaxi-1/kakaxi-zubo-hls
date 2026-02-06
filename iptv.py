@@ -17,8 +17,10 @@ import shutil
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-BASE_DIR = os.getenv("BASE_DIR", os.path.dirname(os.path.abspath(__file__)))
-CONFIG_FILE = "/app/config/iptv_config.json"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+CONFIG_FILE = os.getenv("CONFIG_FILE")
+if not CONFIG_FILE:
+    CONFIG_FILE = os.path.join(BASE_DIR, "iptv_config.json")
 OUTPUT_FILE = os.path.join(BASE_DIR, "IPTV.txt")
 DEFAULT_THIRD_PARTY_URLS = OrderedDict([
     ("https://raw.githubusercontent.com/kakaxi-1/IPTV/main/iptv.txt", "source1.txt"),
