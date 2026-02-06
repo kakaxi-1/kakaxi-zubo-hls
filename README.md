@@ -24,9 +24,10 @@ Any commercial use requires prior written permission from the author.
 docker run -d \
   --name zubo \
   --restart unless-stopped \
-  -p 5020:5020 \
+  --network=host \
   -e PORT=5020 \
   -e TZ=Asia/Shanghai \
+  -v $(pwd)/config:/app/config \
   kakaxi088/zubo:latest
 
 ⸻
@@ -36,17 +37,17 @@ docker run -d \
 services:
   iptv-server:
     image: kakaxi088/zubo:latest
-    container_name: zubo
+    container_name: iptv-zubo
     restart: unless-stopped
+    network_mode: bridge
     ports:
       - "5020:5020"
     volumes:
       - ./config:/app/config
-      - /etc/localtime:/etc/localtime:ro
     environment:
+      - TZ=Asia/Shanghai
       - PORT=5020
       - CONFIG_FILE=/app/config/iptv_config.json
-      - TZ=Asia/Shanghai
 
 ⸻
 
