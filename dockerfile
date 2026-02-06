@@ -1,38 +1,56 @@
+FROM alpine:3.18 as ffmpeg-builder
+
+ARG TARGETARCH
+
+RUN apk add --no-cache wget xz && \
+    if [ "$TARGETARCH" = "amd64" ]; then \
+        wget -q https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz && \
+        tar xf ffmpeg-release-amd64-static.tar.xz && \
+        mv ffmpeg-*-static/ffmpeg /tmp/ffmpeg; \
+    elif [ "$TARGETARCH" = "arm64" ]; then \
+        wget -q https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-arm64-static.tar.xz && \
+        tar xf ffmpeg-release-arm64-static.tar.xz && \
+        mv ffmpeg-*-static/ffmpeg /tmp/ffmpeg; \
+    fi && \
+    chmod +x /tmp/ffmpeg
+
+
 FROM python:3.9-slim-bullseye
 
 ENV TZ=Asia/Shanghai
 
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y \
-    ffmpeg \
+RUN apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     tzdata \
-    curl && \
+    ca-certificates \
+    && \
     ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && \
     echo $TZ > /etc/timezone && \
-    dpkg-reconfigure -f noninteractive tzdata && \
-    rm -rf /var/lib/apt/lists/*
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
-RUN echo "容器时区设置：" && \
-    date && \
-    cat /etc/timezone && \
-    ls -la /etc/localtime
+COPY --from=ffmpeg-builder /tmp/ffmpeg /usr/local/bin/ffmpeg
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt && \
+    rm -rf /root/.cache/pip
 
 COPY . .
 
-RUN echo '{"categories": {}, "mapping": {}, "third_party_urls": {}, "settings": {}}' > /app/iptv_config_default.json
-RUN echo '{}' > /app/iptv_config.json
+RUN mkdir -p /app/logs /app/hls /app/ip /app/rtp /app/web /app/config && \
+    echo '{}' > /app/config/iptv_config.json && \
+    chmod +x /app/start.sh
 
-RUN mkdir -p /app/logs /app/hls /app/ip /app/rtp /app/web
-
-RUN chmod +x /app/start.sh
+RUN find /app -name "*.pyc" -delete && \
+    find /app -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
 
 EXPOSE 5020
 
 ENV HLS_ROOT=/app/hls
 ENV PORT=5020
+ENV CONFIG_FILE=/app/config/iptv_config.json
 
 CMD ["/app/start.sh"]
