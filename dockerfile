@@ -1,4 +1,4 @@
-FROM alpine:3.18 as ffmpeg-builder
+FROM alpine:3.18 AS ffmpeg-builder
 
 ARG TARGETARCH
 
