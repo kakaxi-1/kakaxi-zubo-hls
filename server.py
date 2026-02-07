@@ -10,7 +10,7 @@ import shutil
 import glob
 from collections import OrderedDict, defaultdict
 from flask import Flask, request, jsonify, send_file, send_from_directory, Response
-from channel_manager import Channel, HLS_ROOT, GlobalThreadPool
+from channel_manager import Channel, HLS_ROOT, GlobalThreadPool, IPActivityManager
 from iptv_watcher import IPTVWatcher, load_iptv
 import iptv
 import pytz
@@ -18,7 +18,6 @@ from datetime import datetime
 SHANGHAI_TZ = pytz.timezone('Asia/Shanghai')
 
 def get_beijing_time():
-    """获取北京时间"""
     return datetime.now(SHANGHAI_TZ)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -163,85 +162,6 @@ class ServiceManager:
                 GlobalThreadPool.shutdown()
             except:
                 pass
-
-
-class IPActivityManager:
-    """IP 活跃管理器"""
-    def __init__(self):
-        self.channel_activities = {}  # channel_name -> {ip: last_seen_ts}
-        self.lock = threading.RLock()
-        self._cleanup_thread = None
-        self._running = False
-    
-    def record_access(self, ip, channel_name):
-        """记录 IP 对频道的访问"""
-        current_time = time.time()
-        
-        with self.lock:
-            if channel_name not in self.channel_activities:
-                self.channel_activities[channel_name] = {}
-            
-            self.channel_activities[channel_name][ip] = current_time
-    
-    def get_active_ips(self, channel_name):
-        """获取频道的活跃 IP"""
-        current_time = time.time()
-        active_ips = {}
-        
-        with self.lock:
-            if channel_name in self.channel_activities:
-                for ip, last_seen in self.channel_activities[channel_name].items():
-                    if current_time - last_seen <= ACTIVE_WINDOW:
-                        active_ips[ip] = last_seen
-        
-        return active_ips
-    
-    def is_channel_active(self, channel_name):
-        """检查频道是否有活跃 IP"""
-        return len(self.get_active_ips(channel_name)) > 0
-    
-    def cleanup_expired_ips(self):
-        """清理过期 IP"""
-        current_time = time.time()
-        
-        with self.lock:
-            for channel_name in list(self.channel_activities.keys()):
-                if channel_name in self.channel_activities:
-                    expired_ips = []
-                    for ip, last_seen in self.channel_activities[channel_name].items():
-                        if current_time - last_seen > ACTIVE_WINDOW:
-                            expired_ips.append(ip)
-                    
-                    for ip in expired_ips:
-                        del self.channel_activities[channel_name][ip]
-                    
-                    if not self.channel_activities[channel_name]:
-                        del self.channel_activities[channel_name]
-    
-    def start_cleanup_thread(self):
-        """启动 IP 清理线程"""
-        self._running = True
-        self._cleanup_thread = threading.Thread(
-            target=self._cleanup_loop,
-            daemon=True,
-            name="IPCleaner"
-        )
-        self._cleanup_thread.start()
-    
-    def _cleanup_loop(self):
-        """IP 清理循环"""
-        while self._running:
-            try:
-                self.cleanup_expired_ips()
-            except Exception:
-                pass
-            time.sleep(IP_CLEAN_INTERVAL)
-    
-    def stop(self):
-        """停止清理线程"""
-        self._running = False
-        if self._cleanup_thread and self._cleanup_thread.is_alive():
-            self._cleanup_thread.join(timeout=2)
 
 
 class GlobalCleaner:
@@ -469,12 +389,10 @@ class ChannelManager:
             ch.start_check_thread()
     
     def record_ip_activity(self, channel_name, client_ip):
-        """记录 IP 活跃时间"""
         if client_ip and self.ip_activity_manager:
             self.ip_activity_manager.record_access(client_ip, channel_name)
     
     def touch(self, channel_name, client_ip=None):
-        """触摸频道"""
         with self.lock:
             ch = self.channels.get(channel_name)
             if not ch:
@@ -548,7 +466,6 @@ class ChannelManager:
 
 
 def execute_scheduled_update():
-    """执行定时更新任务"""
     try:
         start_time = time.time()
         
@@ -581,10 +498,7 @@ def execute_scheduled_update():
             f.write(error_msg + "\n")
 
 def start_beijing_scheduler():
-    """
-    北京时间调度器
-    """
-    print("🕒 启动北京时间调度器")
+    print("启动北京时间调度器")
 
     last_run = set()
 
@@ -613,7 +527,7 @@ def start_beijing_scheduler():
                     run_key = f"{today}_{time_str}"
 
                     if current_hm == time_str and run_key not in last_run:
-                        print(f"⏰ 命中定时任务 {time_str}")
+                        print(f"命中定时任务 {time_str}")
                         execute_scheduled_update()
                         last_run.add(run_key)
 
@@ -623,7 +537,7 @@ def start_beijing_scheduler():
                         last_run.remove(k)
 
             except Exception as e:
-                print(f"❌ 定时调度异常: {e}")
+                print(f"定时调度异常: {e}")
 
             time.sleep(20)
 
@@ -734,15 +648,21 @@ def serve_hls(channel_path):
     return _serve_file_directly(file_path, "ts")
 
 def _ensure_channel_ready(channel_name, manager, client_ip=None):
-    """确保频道就绪，返回True表示频道可以播放"""
     ch = manager.channels.get(channel_name)
     if not ch:
         return False
+    
+    if client_ip and manager.ip_activity_manager:
+        if not manager.ip_activity_manager.can_start_channel(client_ip, channel_name, limit=5):
+            return False
     
     if client_ip:
         manager.record_ip_activity(channel_name, client_ip)
     
     result = ch.touch()
+    
+    if result and client_ip and manager.ip_activity_manager:
+        manager.ip_activity_manager.mark_channel_started(client_ip, channel_name)
     
     return result
 
@@ -1256,7 +1176,6 @@ def manual_update_iptv():
 
 @app.route("/api/schedules", methods=["GET"])
 def get_schedules():
-    """获取定时任务配置"""
     try:
         config = iptv.load_config()
         settings = config.get("settings", {})
@@ -1274,7 +1193,6 @@ def get_schedules():
 
 @app.route("/api/schedules", methods=["POST"])
 def save_schedules():
-    """保存定时任务配置"""
     try:
         data = request.json
         if not data or not isinstance(data, list):
@@ -1307,7 +1225,6 @@ def save_schedules():
         config["settings"]["schedules"] = validated_schedules
         
         if iptv.save_config(config):
-            
             return jsonify(standard_response(200, "定时任务配置保存成功", validated_schedules))
         else:
             return jsonify(standard_response(-1, "配置保存失败"))
@@ -1317,7 +1234,6 @@ def save_schedules():
 
 @app.route("/api/schedules/reload", methods=["POST"])
 def reload_schedules():
-    """重新加载定时任务"""
     return jsonify(standard_response(200, "北京时间调度器无需重载"))
 
 @app.route("/api/health", methods=["GET"])
@@ -1380,7 +1296,6 @@ def get_all_channels_status():
         return jsonify(standard_response(-1, f"获取频道状态失败: {str(e)}"))
 
 def kill_orphan_ffmpeg():
-    """启动时清理残留的 ffmpeg 进程"""
     if sys.platform.startswith('linux') or sys.platform == 'darwin':
         try:
             subprocess.run(["pkill", "-9", "ffmpeg"], capture_output=True)
