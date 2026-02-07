@@ -7,7 +7,7 @@ import shutil
 import requests
 import urllib3
 import queue
-from collections import deque
+from collections import deque, defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -109,6 +109,97 @@ def shutdown_global_pool():
         _global_executor = None
 
 
+class IPActivityManager:
+    def __init__(self):
+        self.channel_activities = {}
+        self.ip_running_channels = defaultdict(set)
+        self.lock = threading.RLock()
+        self._cleanup_thread = None
+        self._running = False
+    
+    def record_access(self, ip, channel_name):
+        current_time = time.time()
+        
+        with self.lock:
+            if channel_name not in self.channel_activities:
+                self.channel_activities[channel_name] = {}
+            
+            self.channel_activities[channel_name][ip] = current_time
+    
+    def get_active_ips(self, channel_name):
+        current_time = time.time()
+        active_ips = {}
+        
+        with self.lock:
+            if channel_name in self.channel_activities:
+                for ip, last_seen in self.channel_activities[channel_name].items():
+                    if current_time - last_seen <= ACTIVE_WINDOW:
+                        active_ips[ip] = last_seen
+        
+        return active_ips
+    
+    def is_channel_active(self, channel_name):
+        return len(self.get_active_ips(channel_name)) > 0
+    
+    def can_start_channel(self, ip, channel_name, limit=5):
+        with self.lock:
+            running = self.ip_running_channels[ip]
+            if channel_name in running:
+                return True
+            return len(running) < limit
+    
+    def mark_channel_started(self, ip, channel_name):
+        with self.lock:
+            self.ip_running_channels[ip].add(channel_name)
+    
+    def mark_channel_stopped(self, ip, channel_name):
+        with self.lock:
+            if channel_name in self.ip_running_channels[ip]:
+                self.ip_running_channels[ip].remove(channel_name)
+            if not self.ip_running_channels[ip]:
+                del self.ip_running_channels[ip]
+    
+    def cleanup_expired_ips(self):
+        current_time = time.time()
+        
+        with self.lock:
+            for channel_name in list(self.channel_activities.keys()):
+                if channel_name in self.channel_activities:
+                    expired_ips = []
+                    for ip, last_seen in self.channel_activities[channel_name].items():
+                        if current_time - last_seen > ACTIVE_WINDOW:
+                            expired_ips.append(ip)
+                    
+                    for ip in expired_ips:
+                        del self.channel_activities[channel_name][ip]
+                        self.mark_channel_stopped(ip, channel_name)
+                    
+                    if not self.channel_activities[channel_name]:
+                        del self.channel_activities[channel_name]
+    
+    def start_cleanup_thread(self):
+        self._running = True
+        self._cleanup_thread = threading.Thread(
+            target=self._cleanup_loop,
+            daemon=True,
+            name="IPCleaner"
+        )
+        self._cleanup_thread.start()
+    
+    def _cleanup_loop(self):
+        while self._running:
+            try:
+                self.cleanup_expired_ips()
+            except Exception:
+                pass
+            time.sleep(2)
+    
+    def stop(self):
+        self._running = False
+        if self._cleanup_thread and self._cleanup_thread.is_alive():
+            self._cleanup_thread.join(timeout=2)
+
+
 class Channel:
     STATE_IDLE = "IDLE"
     STATE_STARTING = "STARTING"
@@ -163,9 +254,9 @@ class Channel:
         self.ffmpeg_log_running = False
         
         self.bad_packet_count = 0
-        self.max_bad_packets = 10
+        self.max_bad_packets = 5
         self.consecutive_empty_chunks = 0
-        self.max_consecutive_empty = 5
+        self.max_consecutive_empty = 3
         
         self.stream_stats = {'video': 0, 'audio': 0, 'other': 0}
         self.last_stats_reset = time.time()
@@ -173,13 +264,16 @@ class Channel:
         
         self.last_chunk_time = 0
         self.slow_chunk_count = 0
-        self.max_slow_chunks = 10
+        self.max_slow_chunks = 6
         
         self.reader_start_time = 0
         self.reader_warmup_data = 0
         self.reader_warmup_chunks = 0
-        self.warmup_time = 5.0
-        self.warmup_data = 300 * 1024
+        self.warmup_time = 3.0
+        self.warmup_data = 200 * 1024
+        
+        self.last_read_time = 0
+        self.read_timeout = 10.0
         
         self.session = requests.Session()
         self.session.verify = False
@@ -209,17 +303,33 @@ class Channel:
             return True
         
         if time.time() - self.last_successful_write > 5.0:
-            return True
+            if self.pipeline_ready:
+                return True
         
         return False
 
+    def _pipeline_switch_source(self):
+        if self.state != self.STATE_RUNNING:
+            return
+
+        self._stop_data_pipeline()
+
+        with self.source_lock:
+            if self.sources:
+                self.current_source_index = (self.current_source_index + 1) % len(self.sources)
+
+        self._reset_quality_counters()
+        self.consecutive_failures = 0
+        self.last_read_time = time.time()
+
+        time.sleep(0.2)
+        self._start_data_pipeline()
+
     def set_ip_activity_manager(self, manager):
-        """设置 IP 活动管理器"""
         with self.lock:
             self.ip_activity_manager = manager
     
     def start_check_thread(self):
-        """启动频道检查线程"""
         if self.check_thread is None or not self.check_thread.is_alive():
             self.check_running = True
             self.check_thread = threading.Thread(
@@ -230,7 +340,6 @@ class Channel:
             self.check_thread.start()
     
     def _check_loop(self):
-        """频道检查循环"""
         while self.check_running:
             try:
                 self._check_and_manage()
@@ -239,7 +348,6 @@ class Channel:
             time.sleep(CHANNEL_CHECK_INTERVAL)
     
     def _check_and_manage(self):
-        """检查和管理频道状态"""
         current_time = time.time()
         
         with self.lock:
@@ -256,20 +364,38 @@ class Channel:
                     
                     if inactive_time >= ACTIVE_WINDOW and uptime >= MIN_UPTIME:
                         should_stop = True
+                
+                if self.reader_running:
+                    if current_time - self.last_read_time > self.read_timeout:
+                        with self.source_lock:
+                            if self.current_response:
+                                try:
+                                    self.current_response.close()
+                                except:
+                                    pass
+                        self.last_read_time = current_time
             
             if should_stop:
+                if self.ip_activity_manager:
+                    active_ips = self.ip_activity_manager.get_active_ips(self.name)
+                    for ip in active_ips.keys():
+                        self.ip_activity_manager.mark_channel_stopped(ip, self.name)
                 self._safe_stop_stream()
             elif self.state in [self.STATE_IDLE, self.STATE_STOPPED]:
                 if self.ip_activity_manager and self.ip_activity_manager.is_channel_active(self.name):
                     self._start_stream()
     
     def _safe_stop_stream(self):
-        """安全停止流"""
         if self.state == self.STATE_STOPPED:
             return
         
         old_state = self.state
         self.state = self.STATE_STOPPING
+        
+        if self.ip_activity_manager:
+            active_ips = self.ip_activity_manager.get_active_ips(self.name)
+            for ip in active_ips.keys():
+                self.ip_activity_manager.mark_channel_stopped(ip, self.name)
         
         self._stop_data_pipeline()
         self._stop_ffmpeg_log_thread()
@@ -284,6 +410,7 @@ class Channel:
         self.hls_ready = False
         self.pipeline_started = False
         self.pipeline_ready = False
+        self.last_read_time = 0
     
     def _stop_ffmpeg_log_thread(self):
         self.ffmpeg_log_running = False
@@ -292,7 +419,6 @@ class Channel:
         self.ffmpeg_log_thread = None
     
     def touch(self):
-        """触摸频道"""
         current_time = time.time()
         
         with self.lock:
@@ -352,7 +478,7 @@ class Channel:
             r = self.session.get(
                 url,
                 stream=True,
-                timeout=5,
+                timeout=(3, 5),
                 headers={
                     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
                     "Connection": "keep-alive"
@@ -400,7 +526,7 @@ class Channel:
             return
         
         self.last_successful_write = time.time()
-        self.pipeline_start_time = time.time() 
+        self.pipeline_start_time = time.time()
         
         self.pipeline_started = True
         self.pipeline_ready = False
@@ -456,6 +582,7 @@ class Channel:
         
         self.pipeline_started = False
         self.pipeline_ready = False
+        self.last_read_time = 0
     
     def _writer_loop(self):
         empty_cycle_count = 0
@@ -505,6 +632,7 @@ class Channel:
                     source_url = self.sources[self.current_source_index]
                 
                 self._reset_quality_counters()
+                self.last_read_time = time.time()
                 
                 response = self._connect_source(source_url)
                 if not response:
@@ -542,6 +670,8 @@ class Channel:
                             has_received_data = True
                         
                         if chunk:
+                            self.last_read_time = time.time()
+                            
                             successful_chunks += 1
                             
                             if successful_chunks % 10 == 0:
@@ -607,51 +737,38 @@ class Channel:
         if not hasattr(self, 'reader_start_time'):
             self.reader_start_time = current_time
             self.reader_warmup_data = 0
-            self.reader_warmup_chunks = 0
         
         self.reader_warmup_data += chunk_len
-        self.reader_warmup_chunks += 1
-        
-        in_warmup = (current_time - self.reader_start_time < self.warmup_time and 
-                     self.reader_warmup_data < self.warmup_data)
-        
-        if in_warmup:
-            if chunk_len == 0:
-                result["valid"] = False
-                result["reason"] = "热身期收到空数据"
-                return result
-            
-            if self.last_chunk_time > 0:
-                time_gap = current_time - self.last_chunk_time
-                if time_gap > 10.0:
-                    pass
-            
+        if current_time - self.reader_start_time < self.warmup_time:
             self.last_chunk_time = current_time
             return result
-        
-        if chunk_len < 10:
+
+        if chunk_len < 188:
             self.bad_packet_count += 1
             if self.bad_packet_count >= self.max_bad_packets:
                 result["valid"] = False
-                result["reason"] = f"坏包过多: {self.bad_packet_count}/{self.max_bad_packets}"
-            return result
-        
-        if chunk_len >= 100:
-            self.bad_packet_count = max(0, self.bad_packet_count - 1)
-        
+                result["reason"] = f"连续小包/碎片包过多: {self.bad_packet_count}/{self.max_bad_packets}"
+                return result
+        else:
+            self.bad_packet_count = 0
+
         if self.last_chunk_time > 0:
             time_gap = current_time - self.last_chunk_time
             
-            if time_gap > 3.0:
-                self.slow_chunk_count += 1
+            if time_gap > 2.5:
+                self.slow_chunk_count += 2
+                
                 if self.slow_chunk_count >= self.max_slow_chunks:
                     result["valid"] = False
-                    result["reason"] = f"数据速率持续过慢: {self.slow_chunk_count}/{self.max_slow_chunks}"
+                    result["reason"] = f"接收数据间隔过大 ({time_gap:.1f}s)"
                     return result
-            else:
+            
+            elif time_gap < 1.0:
                 self.slow_chunk_count = max(0, self.slow_chunk_count - 1)
         
         self.last_chunk_time = current_time
+        
+        self.last_read_time = current_time
         
         return result
     
@@ -685,6 +802,7 @@ class Channel:
         
         self._reset_quality_counters()
         self.consecutive_failures = 0
+        self.last_read_time = time.time()
         
         time.sleep(0.5)
     
@@ -693,7 +811,7 @@ class Channel:
             response = self.session.get(
                 url,
                 stream=True,
-                timeout=5
+                timeout=(3, 10)
             )
             
             if response.status_code == 200:
@@ -748,6 +866,7 @@ class Channel:
         self.start_time = time.time()
         self.last_active_ts = time.time()
         self.hls_ready = False
+        self.last_read_time = time.time()
         
         if self.stream_thread is None or not self.stream_thread.is_alive():
             self.stream_thread = threading.Thread(
@@ -777,7 +896,9 @@ class Channel:
                     break
                 
                 if self._pipeline_dead():
-                    break
+                    self._pipeline_switch_source()
+                    time.sleep(0.5)
+                    continue
                 
                 time.sleep(0.5)
                 
@@ -795,6 +916,7 @@ class Channel:
                 self.state = self.STATE_STOPPED
                 self.start_time = 0
                 self.last_active_ts = 0
+                self.last_read_time = 0
     
     def _kill_ffmpeg(self):
         if not self.proc:
@@ -832,6 +954,11 @@ class Channel:
         self.check_thread = None
     
     def cleanup(self):
+        if self.ip_activity_manager:
+            active_ips = self.ip_activity_manager.get_active_ips(self.name)
+            for ip in active_ips.keys():
+                self.ip_activity_manager.mark_channel_stopped(ip, self.name)
+        
         self.stop_check_thread()
         self._stop_data_pipeline()
         self._stop_ffmpeg_log_thread()
@@ -855,7 +982,7 @@ class Channel:
             pass
     
     def _clean_hls_immediate(self):
-        if not os.path.exists(self.output_dir): 
+        if not os.path.exists(self.output_dir):
             return
         
         try:
