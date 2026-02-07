@@ -24,6 +24,7 @@ if not CONFIG_FILE:
 OUTPUT_FILE = os.path.join(BASE_DIR, "IPTV.txt")
 DEFAULT_THIRD_PARTY_URLS = OrderedDict([
     ("https://raw.githubusercontent.com/kakaxi-1/IPTV/main/iptv.txt", "source1.txt"),
+    ("https://gh-proxy.com/https://raw.githubusercontent.com/kakaxi-1/IPTV/main/iptv.txt", "source2.txt"),
 ])
 
 HEADERS = {
