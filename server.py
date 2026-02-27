@@ -625,12 +625,21 @@ def serve_hls(channel_path):
         success = _ensure_channel_ready(channel_name, manager, client_ip)
         
         if not success:
+            fallback_m3u8 = (
+                "#EXTM3U\n"
+                "#EXT-X-VERSION:3\n"
+                "#EXT-X-TARGETDURATION:2\n"
+                "#EXT-X-MEDIA-SEQUENCE:0\n"
+            )
             return Response(
-                status=503,
-                mimetype="text/plain",
+                fallback_m3u8,
+                status=200,
+                mimetype="application/vnd.apple.mpegurl",
                 headers={
-                    "Retry-After": "3",
-                    "Cache-Control": "no-cache",
+                    "Cache-Control": "no-cache, no-store, must-revalidate",
+                    "Pragma": "no-cache",
+                    "Expires": "0",
+                    "Access-Control-Allow-Origin": "*"
                 }
             )
         
