@@ -24,7 +24,7 @@ if not CONFIG_FILE:
 OUTPUT_FILE = os.path.join(BASE_DIR, "IPTV.txt")
 DEFAULT_THIRD_PARTY_URLS = OrderedDict([
     ("https://raw.githubusercontent.com/kakaxi-1/IPTV/main/iptv.txt", "source1.txt"),
-    ("https://gh-proxy.com/https://raw.githubusercontent.com/kakaxi-1/IPTV/main/iptv.txt", "source2.txt"),
+    ("https://raw.githubusercontent.com/kakaxi-1/zubo/main/IPTV.txt", "source2.txt"),
 ])
 
 HEADERS = {
@@ -582,79 +582,71 @@ def second_stage_in_memory():
     return list(unique_lines.values())
 
 
-def check_stream_speed(url, timeout=5):
+def check_ip_stream_speed(ip_port, test_url, max_duration=7, target_speed=1024):
+    """
+    检测IP流的速度，只要在指定时间内达到目标速度就认为有效
+    """
     try:
         start_time = time.time()
+        total_downloaded = 0
         
-        with requests.get(url, stream=True, timeout=timeout, headers=HEADERS, verify=False) as r:
+        with requests.get(test_url, stream=True, timeout=max_duration+5, headers=HEADERS, verify=False) as r:
             if r.status_code != 200:
-                return False, float('inf')
+                return False, 0
             
-            first_chunk = next(r.iter_content(chunk_size=188), None)
-            if not first_chunk or len(first_chunk) < 188:
-                return False, float('inf')
-            
-            target_size = 512 * 1024 
-            downloaded = len(first_chunk)
-            
-            for chunk in r.iter_content(chunk_size=4096):
-                downloaded += len(chunk)
-                if downloaded >= target_size:
-                    break
-                if time.time() - start_time > timeout:
-                    return False, float('inf')
-
-            duration = time.time() - start_time
-            if duration <= 0: 
-                duration = 0.01
-            
-            speed_kb = (downloaded / 1024) / duration
-            
-            if speed_kb < 300: 
-                return False, float('inf')
-
-            return True, int(duration * 1000)
-
+            for chunk in r.iter_content(chunk_size=8192):
+                if chunk:
+                    chunk_size = len(chunk)
+                    total_downloaded += chunk_size
+                    
+                    current_time = time.time()
+                    elapsed = current_time - start_time
+                    
+                    if elapsed > 0:
+                        current_speed = (total_downloaded / 1024) / elapsed
+                        
+                        if current_speed >= target_speed:
+                            return True, current_speed
+                    
+                    if elapsed >= max_duration:
+                        break
+        
+        return False, 0
+        
     except Exception:
-        return False, float('inf')
+        return False, 0
 
 
 def detect_ip_channels(ip_port, entries):
-    valid_channels = {}
-    response_times = []
-    
-    priority_candidates = []
-    other_candidates = []
+    """
+    使用湖南卫视测试
+    """
+    test_url = None
+    channel_list = []
     
     for ch_main, url in entries:
-        valid_channels[url] = ch_main
-        if "CCTV" in ch_main or "卫视" in ch_main:
-            priority_candidates.append(url)
-        else:
-            other_candidates.append(url)
-            
-    test_urls = priority_candidates[:2]
-    if len(test_urls) < 2 and other_candidates:
-        test_urls.extend(other_candidates[:2-len(test_urls)])
+        channel_list.append((ch_main, url))
+        if ch_main == "湖南卫视" or "湖南卫视" in ch_main:
+            test_url = url
     
-    if not test_urls and entries:
-        test_urls.append(entries[0][1])
-    
-    success_count = 0
-    
-    for url in test_urls:
-        is_valid, duration = check_stream_speed(url, timeout=3)
-        if is_valid:
-            success_count += 1
-            response_times.append(duration)
-            if duration < 500:
+    if not test_url:
+        for ch_main, url in entries:
+            if "卫视" in ch_main:
+                test_url = url
                 break
     
-    if success_count > 0:
-        avg_time = sum(response_times) / len(response_times)
-        return ip_port, True, avg_time, valid_channels
+    if not test_url and entries:
+        test_url = entries[0][1]
     
-    return ip_port, False, float('inf'), {}
+    if not test_url:
+        return ip_port, False, 0, []
+    
+    is_valid, speed = check_ip_stream_speed(ip_port, test_url, max_duration=7, target_speed=900)
+    
+    if is_valid:
+        return ip_port, True, speed, channel_list
+    else:
+        return ip_port, False, 0, []
 
 
 def third_stage_enhanced():
@@ -677,31 +669,36 @@ def third_stage_enhanced():
             groups.setdefault(ip_port, []).append((ch_main, url))
 
     valid_results = []
-    max_workers = 10
+    max_workers = 3
     
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {executor.submit(detect_ip_channels, ip, chs): ip for ip, chs in groups.items()}
         
         for future in concurrent.futures.as_completed(futures):
             try:
-                ip_port, ip_is_valid, avg_time, valid_channels = future.result()
-                if ip_is_valid:
+                ip_port, ip_is_valid, speed, channel_list = future.result()
+                if ip_is_valid and channel_list:
                     valid_results.append({
-                        'time': avg_time,
-                        'channels': valid_channels
+                        'ip': ip_port,
+                        'speed': speed,
+                        'channels': channel_list
                     })
             except Exception:
                 continue
 
-    valid_results.sort(key=lambda x: x['time'])
+    valid_results.sort(key=lambda x: x['speed'], reverse=True)
 
     channel_urls = OrderedDict()
     
     for item in valid_results:
-        for url, ch_main in item['channels'].items():
+        for ch_main, url in item['channels']:
             if ch_main not in channel_urls:
                 channel_urls[ch_main] = []
-            channel_urls[ch_main].append(url)
+            channel_urls[ch_main].append((item['speed'], url))
+    
+    for ch_main in channel_urls:
+        channel_urls[ch_main].sort(key=lambda x: x[0], reverse=True)
+        channel_urls[ch_main] = [url for speed, url in channel_urls[ch_main]]
 
     try:
         with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
@@ -710,11 +707,12 @@ def third_stage_enhanced():
             f.write(f"{now_str},url\n")
             
             for category, channel_list in categories_config.items():
-                f.write(f"\n{category},#genre#\n")
-                for channel_name in channel_list:
-                    if channel_name in channel_urls:
-                        for url in channel_urls[channel_name]:
-                            f.write(f"{channel_name},{url}\n")
+                if channel_list:
+                    f.write(f"\n{category},#genre#\n")
+                    for channel_name in channel_list:
+                        if channel_name in channel_urls and channel_urls[channel_name]:
+                            for url in channel_urls[channel_name]:
+                                f.write(f"{channel_name},{url}\n")
             
         if CONFIG_FILE and os.path.dirname(CONFIG_FILE):
             config_output = os.path.join(os.path.dirname(CONFIG_FILE), "IPTV.txt")
@@ -752,8 +750,6 @@ def run_update(force=False, wait_for_lock=True):
                 return 0
         
         try:
-            start_time = time.time()
-            
             config = init_environment()
             
             first_stage()
@@ -761,8 +757,6 @@ def run_update(force=False, wait_for_lock=True):
             third_stage_enhanced()
             
             save_config(config)
-            
-            end_time = time.time()
             
             return 0
             
