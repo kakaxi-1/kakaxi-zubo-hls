@@ -19,8 +19,8 @@ ACTIVE_WINDOW = 8
 MIN_UPTIME = 13
 CHANNEL_CHECK_INTERVAL = 3
 
-RACE_CONCURRENCY = 5
-RACE_FIRST_CHUNK_SIZE = 128 * 1024
+RACE_CONCURRENCY = 10
+RACE_FIRST_CHUNK_SIZE = 188 * 700
 RACE_CONNECT_TIMEOUT = (2.0, 3.0)
 RACE_SWITCH_COOLDOWN = 3
 
@@ -231,7 +231,7 @@ class Channel:
     def __init__(self, name, sources):
         self.name = name
         self.sources = list(sources)
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()
         self.ip_activity_manager = None
         self.proc = None
         
@@ -257,7 +257,7 @@ class Channel:
         self.reader_thread = None
         self.reader_running = False
         self.current_response = None
-        self.source_lock = threading.Lock()
+        self.source_lock = threading.RLock()
         self.last_successful_write = 0
         self.consecutive_failures = 0
         self.pipeline_started = False
@@ -266,21 +266,21 @@ class Channel:
         self.buffer_size = 10 * 1024 * 1024
         
         self.last_read_time = 0
-        self.read_timeout = 2.0
+        self.read_timeout = 3.0
         
         self.bitrate_window_start = 0
         self.bitrate_bytes = 0
-        self.min_bitrate = 640 * 1024
+        self.min_bitrate = 752 * 1024
         self.max_chunk_gap = 2.0
-        self.min_chunk_size = 32 * 1024
+        self.min_chunk_size = 47 * 1024
         self.low_bitrate_count = 0
         
         self.last_switch_time = 0
         self.race_futures = []
         self.race_in_progress = False
-        self.race_lock = threading.Lock()
+        self.race_lock = threading.RLock()
         self.failed_sources = {}
-        self.failed_source_ttl = 30
+        self.failed_source_ttl = 45
         
         self.session = requests.Session()
         self.session.verify = False
@@ -299,6 +299,11 @@ class Channel:
         
         self.last_touch_time = 0
 
+    def _trigger_race(self):
+        """【修改1】统一竞速触发入口，避免重复触发"""
+        if not self.race_in_progress:
+            submit_global_task(self._race_switch_source)
+
     def _pipeline_dead(self):
         if not self.pipeline_ready:
             return False
@@ -309,7 +314,8 @@ class Channel:
         if not self.writer_thread or not self.writer_thread.is_alive():
             return True
         
-        if time.time() - self.last_successful_write > 8.0:
+        # 【修改5】放宽判定阈值，从12秒改为18秒，避免误判
+        if time.time() - self.last_successful_write > 18.0:
             if self.pipeline_ready:
                 return True
         
@@ -317,7 +323,7 @@ class Channel:
             ts_files = glob.glob(os.path.join(self.output_dir, "seg_*.ts"))
             if ts_files:
                 latest_ts = max(ts_files, key=os.path.getmtime)
-                if time.time() - os.path.getmtime(latest_ts) > 12:
+                if time.time() - os.path.getmtime(latest_ts) > 18:
                     return True
         except:
             pass
@@ -325,7 +331,7 @@ class Channel:
         return False
 
     def _pipeline_switch_source(self):
-        """切源方法，使用竞速机制"""
+        """改进的切源方法，使用竞速机制"""
         if self.state != self.STATE_RUNNING:
             return
         
@@ -337,7 +343,7 @@ class Channel:
         
         self._stop_current_reader()
         
-        submit_global_task(self._race_switch_source)
+        self._trigger_race()
 
     def _stop_current_reader(self):
         """停止当前的reader"""
@@ -401,7 +407,7 @@ class Channel:
         return ordered_sources[:count]
 
     def _race_connect_worker(self, source_index: int, url: str) -> RaceConnectionResult:
-        """竞速连接工作线程"""
+        """竞速连接工作线程 - 【修改4】增强超时控制"""
         result = RaceConnectionResult(
             url=url, 
             source_index=source_index,
@@ -424,19 +430,26 @@ class Channel:
             )
             
             if response.status_code == 200:
+                # 设置底层socket超时
                 try:
-                    first_chunk = next(response.iter_content(chunk_size=RACE_FIRST_CHUNK_SIZE))
-                    
-                    if first_chunk and len(first_chunk) > 0:
-                        result.response = response
-                        result.first_chunk = first_chunk
-                        result.success = True
-                        result.connect_time = time.time() - start_time
-                    else:
-                        response.close()
-                except StopIteration:
-                    response.close()
-                except Exception:
+                    if hasattr(response.raw, '_fp') and hasattr(response.raw._fp, 'fp'):
+                        if hasattr(response.raw._fp.fp, 'raw'):
+                            sock = response.raw._fp.fp.raw._sock
+                            sock.settimeout(2.0)
+                except:
+                    pass
+                
+                # 【修改4】设置decode_content=False，避免自动解码影响超时
+                response.raw.decode_content = False
+                
+                first_chunk = next(response.iter_content(chunk_size=RACE_FIRST_CHUNK_SIZE))
+                
+                if first_chunk and len(first_chunk) > 0:
+                    result.response = response
+                    result.first_chunk = first_chunk
+                    result.success = True
+                    result.connect_time = time.time() - start_time
+                else:
                     response.close()
             else:
                 response.close()
@@ -448,7 +461,7 @@ class Channel:
         return result
 
     def _race_switch_source(self):
-        """竞速切源方法"""
+        """执行竞速切源 - 热切换数据源，不重启FFmpeg"""
         with self.race_lock:
             if self.race_in_progress:
                 return
@@ -457,6 +470,8 @@ class Channel:
         try:
             candidates = self._get_eligible_sources(RACE_CONCURRENCY)
             if not candidates:
+                with self.race_lock:
+                    self.race_in_progress = False
                 return
             
             futures = []
@@ -470,10 +485,9 @@ class Channel:
             winner = None
             completed = 0
             total = len(futures)
-            start_time = time.time()
             
-            while completed < total and not winner and (time.time() - start_time) < 3:
-                for future in as_completed(futures, timeout=0.5):
+            while completed < total and not winner:
+                for future in as_completed(futures, timeout=5):
                     completed += 1
                     if future.cancelled():
                         continue
@@ -488,31 +502,39 @@ class Channel:
                             break
                     except:
                         continue
-                
+                    
                 if winner:
                     break
             
             if winner:
                 with self.source_lock:
+                    # 1. 关掉旧的 HTTP 响应，释放连接
                     if self.current_response:
                         try:
                             self.current_response.close()
                         except:
                             pass
                     
+                    # 2. 切换新源
                     self.current_response = winner.response
                     self.current_source_index = winner.source_index
                     
-                    if winner.first_chunk and self.data_queue and self.writer_running:
+                    # 3. 【修改2】安全清空队列，不设上限
+                    if self.data_queue:
+                        # 完全清空队列，避免旧数据残留
+                        while not self.data_queue.empty():
+                            try:
+                                self.data_queue.get_nowait()
+                            except queue.Empty:
+                                break
+                            except:
+                                break
+                    
+                    # 4. 将第一块数据放入队列
+                    if winner.first_chunk and self.data_queue:
                         try:
-                            while not self.data_queue.empty():
-                                try:
-                                    self.data_queue.get_nowait()
-                                except:
-                                    break
-                            
                             self.data_queue.put(winner.first_chunk, block=False)
-                        except:
+                        except Exception:
                             pass
                     
                     self.last_read_time = time.time()
@@ -526,9 +548,6 @@ class Channel:
             else:
                 for idx, _ in candidates:
                     self.failed_sources[idx] = time.time()
-                
-                if len(self.failed_sources) >= len(self.sources):
-                    self.failed_sources.clear()
                 
         except Exception as e:
             pass
@@ -580,7 +599,7 @@ class Channel:
                 
                 if self.reader_running:
                     if current_time - self.last_read_time > self.read_timeout:
-                        submit_global_task(self._race_switch_source)
+                        self._trigger_race()
                         self.last_read_time = current_time
             
             if should_stop:
@@ -675,6 +694,54 @@ class Channel:
         except:
             return False
 
+    def _connect_worker(self, url):
+        try:
+            r = self.session.get(
+                url,
+                stream=True,
+                timeout=(3, 5),
+                headers={
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                    "Connection": "keep-alive"
+                }
+            )
+            if r.status_code == 200:
+                first_chunk = next(r.iter_content(chunk_size=65536))
+                return (r, first_chunk, url)
+            else:
+                r.close()
+                return None
+        except Exception:
+            return None
+
+    def _race_connect(self, candidate_urls):
+        if not candidate_urls:
+            return None
+        
+        futures = []
+        winner = None
+        
+        for url in candidate_urls:
+            f = self.executor.submit(self._connect_worker, url)
+            futures.append(f)
+        
+        try:
+            for f in as_completed(futures):
+                result = f.result()
+                if result:
+                    winner = result
+                    break 
+        except Exception:
+            pass
+
+        return winner
+
+    def _get_next_source_index(self):
+        if not self.sources:
+            return 0
+        self.current_source_index = (self.current_source_index + 1) % len(self.sources)
+        return self.current_source_index
+
     def _start_data_pipeline(self):
         if self.pipeline_started:
             return
@@ -684,7 +751,7 @@ class Channel:
         self.pipeline_started = True
         self.pipeline_ready = False
         
-        self.data_queue = queue.Queue(maxsize=200)
+        self.data_queue = queue.Queue(maxsize=300)
         self.writer_running = True
         self.writer_thread = threading.Thread(
             target=self._writer_loop,
@@ -701,7 +768,7 @@ class Channel:
         )
         self.reader_thread.start()
         
-        submit_global_task(self._race_switch_source)
+        self._trigger_race()
     
     def _stop_data_pipeline(self):
         if not self.pipeline_started:
@@ -740,12 +807,22 @@ class Channel:
         self.last_read_time = 0
     
     def _writer_loop(self):
+        """【修改3】writer永不退出，失败超过阈值后重置计数器"""
         while self.writer_running:
             try:
                 try:
                     data = self.data_queue.get(timeout=0.1)
                 except queue.Empty:
                     continue
+                
+                # 检查FFmpeg进程状态，如果崩溃则尝试重启（加锁）
+                if self.proc is None or self.proc.poll() is not None:
+                    if self.writer_running:
+                        with self.lock:
+                            if (self.proc is None or self.proc.poll() is not None) and self.writer_running:
+                                self._start_ffmpeg(clean_old_files=False)
+                                time.sleep(0.2)
+                        continue
                 
                 if self._safe_write_to_ffmpeg(data):
                     self.last_successful_write = time.time()
@@ -755,58 +832,89 @@ class Channel:
                         self.pipeline_ready = True
                 else:
                     self.consecutive_failures += 1
+                    # 【修改3】不退出线程，只是重置计数器并继续
                     if self.consecutive_failures > 3:
-                        break
+                        self.consecutive_failures = 0
+                        continue
                 
             except Exception:
                 time.sleep(0.05)
         
         self.writer_running = False
     
+    def _connect_source(self, url):
+        try:
+            response = self.session.get(
+                url,
+                stream=True,
+                timeout=(1.5, 2.5)
+            )
+
+            if response.status_code == 200:
+                try:
+                    sock = response.raw._fp.fp.raw._sock
+                    sock.settimeout(1.0)
+                except:
+                    pass
+                return response
+            else:
+                response.close()
+                return None
+
+        except Exception:
+            return None
+    
     def _reader_loop(self):
-        """reader 循环，使用竞速结果"""
+        """直接使用current_response，不再重复连接"""
         while self.reader_running:
             try:
+                response_to_use = None
                 with self.source_lock:
-                    if not self.current_response:
-                        if not self.race_in_progress:
-                            submit_global_task(self._race_switch_source)
-                        time.sleep(0.2)
+                    if not self.sources:
+                        time.sleep(0.5)
                         continue
                     
-                    response = self.current_response
-                    source_index = self.current_source_index
-                
+                    if not self.current_response:
+                        if not self.race_in_progress:
+                            self._trigger_race()
+                        time.sleep(0.1)
+                        continue
+                    
+                    response_to_use = self.current_response
+
                 self.last_read_time = time.time()
                 self.bitrate_window_start = time.time()
                 self.bitrate_bytes = 0
-                
-                for chunk in response.iter_content(chunk_size=16384):
+
+                for chunk in response_to_use.iter_content(chunk_size=188 * 174):
                     if not self.reader_running:
                         break
                         
                     if not chunk:
-                        submit_global_task(self._race_switch_source)
+                        if self.reader_running:
+                            self._trigger_race()
                         break
 
                     now = time.time()
                     
-                    if now - self.last_read_time > 2.0:
-                        submit_global_task(self._race_switch_source)
+                    if now - self.last_read_time > self.max_chunk_gap:
+                        if self.reader_running:
+                            self._trigger_race()
                         break
                     
                     self.bitrate_bytes += len(chunk)
-                    if now - self.bitrate_window_start >= 2.0:
-                        bitrate = self.bitrate_bytes / 2.0 * 8
+                    if now - self.bitrate_window_start >= 3.0:
+                        bitrate = self.bitrate_bytes / 3.0
                         if bitrate < self.min_bitrate:
-                            self.low_bitrate_count += 1
-                            if self.low_bitrate_count >= 2:
-                                submit_global_task(self._race_switch_source)
+                            if self.low_bitrate_count >= 1:
+                                if self.reader_running:
+                                    self._trigger_race()
                                 self.low_bitrate_count = 0
                                 break
+                            else:
+                                self.low_bitrate_count += 1
                         else:
                             self.low_bitrate_count = 0
-                        
                         self.bitrate_window_start = now
                         self.bitrate_bytes = 0
 
@@ -820,18 +928,24 @@ class Channel:
 
                     try:
                         self.data_queue.put(chunk, block=False)
-                    except queue.Full:
+                    except:
                         pass
                 
                 if self.reader_running:
-                    time.sleep(0.1)
-                    submit_global_task(self._race_switch_source)
+                    self._trigger_race()
 
-            except Exception as e:
-                submit_global_task(self._race_switch_source)
-                time.sleep(0.2)
+            except Exception:
+                if self.reader_running:
+                    self._trigger_race()
+                time.sleep(0.1)
 
         self.reader_running = False
+    
+    def _reader_switch_source(self):
+        if not self.reader_running:
+            return
+        
+        self._trigger_race()
     
     def _safe_write_to_ffmpeg(self, data):
         if not self.proc or self.proc.poll() is not None:
@@ -839,6 +953,7 @@ class Channel:
         
         try:
             self.proc.stdin.write(data)
+            self.proc.stdin.flush()
             return True
         except (BrokenPipeError, OSError):
             return False
@@ -878,12 +993,24 @@ class Channel:
         self.state = self.STATE_RUNNING
         
         try:
+            ffmpeg_dead_count = 0
             while self.state == self.STATE_RUNNING:
                 if self.proc is None or self.proc.poll() is not None:
-                    break
+                    ffmpeg_dead_count += 1
+                    if ffmpeg_dead_count > 4:
+                        break
+                    time.sleep(0.5)
+                    if self.state == self.STATE_RUNNING:
+                        with self.lock:
+                            if self.proc is None or self.proc.poll() is not None:
+                                self._start_ffmpeg(clean_old_files=False)
+                    continue
+                else:
+                    ffmpeg_dead_count = 0
                 
                 if self._pipeline_dead():
-                    self._pipeline_switch_source()
+                    if not self.race_in_progress:
+                        self._trigger_race()
                     time.sleep(0.5)
                     continue
                 
@@ -905,79 +1032,84 @@ class Channel:
                 self.last_read_time = 0
     
     def _kill_ffmpeg(self):
-        if not self.proc:
-            return
-        
-        try:
-            if self.proc.stdin:
-                try:
-                    self.proc.stdin.close()
-                except:
-                    pass
-            
-            time.sleep(0.1)
-            
-            self.proc.terminate()
+        with self.lock:
+            if not self.proc:
+                return
             
             try:
-                self.proc.wait(timeout=2)
-            except subprocess.TimeoutExpired:
-                self.proc.kill()
+                if self.proc.stdin:
+                    try:
+                        self.proc.stdin.close()
+                    except:
+                        pass
+                
+                time.sleep(0.1)
+                
+                self.proc.terminate()
+                
                 try:
                     self.proc.wait(timeout=2)
-                except:
-                    pass
-            
-        except Exception:
-            pass
-        finally:
-            self.proc = None
+                except subprocess.TimeoutExpired:
+                    self.proc.kill()
+                    try:
+                        self.proc.wait(timeout=2)
+                    except:
+                        pass
+                
+            except Exception:
+                pass
+            finally:
+                self.proc = None
     
     def _start_ffmpeg(self, clean_old_files=True):
-        os.makedirs(self.output_dir, exist_ok=True)
-        
-        if clean_old_files:
-            self._clean_old_ts_files()
-        
-        start_number = int(time.time() * 100) % 1000000
-        
-        cmd = [
-            "ffmpeg",
-            "-loglevel", "warning",
-            "-fflags", "nobuffer+genpts+igndts+flush_packets",
-            "-analyzeduration", "1000000",
-            "-probesize", "1000000",
-            "-f", "mpegts",
-            "-i", "pipe:0",
-            "-c:v", "copy",
-            "-flags", "+low_delay",
-            "-c:a", "aac",
-            "-b:a", "128k",
-            "-ac", "2",
-            "-ar", "44100",
-            "-f", "hls",
-            "-hls_time", "2",
-            "-hls_list_size", "6",
-            "-hls_flags", "delete_segments+split_by_time+independent_segments+append_list+discont_start",
-            "-start_number", str(start_number),
-            "-hls_segment_filename",
-            os.path.join(self.output_dir, "seg_%06d.ts"),
-            os.path.join(self.output_dir, "index.m3u8")
-        ]
+        with self.lock:
+            os.makedirs(self.output_dir, exist_ok=True)
             
-        try:
-            self.proc = subprocess.Popen(
-                cmd,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                bufsize=1048576
-            )
-            self.proc_start_time = time.time()
-            return True
-        except Exception:
-            self.proc = None
-            return False
+            if clean_old_files:
+                self._clean_old_ts_files()
+            
+            start_number = int(time.time() * 100) % 1000000
+
+            hls_flags = "delete_segments+split_by_time+independent_segments+omit_endlist"
+            if not clean_old_files and os.path.exists(os.path.join(self.output_dir, "index.m3u8")):
+                hls_flags += "+append_list"
+            
+            cmd = [
+                "ffmpeg",
+                "-loglevel", "warning",
+                "-fflags", "nobuffer+genpts+discardcorrupt+igndts+flush_packets",
+                "-flags", "low_delay",
+                "-err_detect", "ignore_err",
+                "-f", "mpegts", 
+                "-i", "pipe:0",
+                "-c:v", "copy",
+                "-c:a", "aac",
+                "-b:a", "128k",
+                "-ac", "2",
+                "-ar", "44100",
+                "-f", "hls",
+                "-hls_time", "2",
+                "-hls_list_size", "6",
+                "-hls_flags", hls_flags,
+                "-start_number", str(start_number),
+                "-hls_segment_filename",
+                os.path.join(self.output_dir, "seg_%06d.ts"),
+                os.path.join(self.output_dir, "index.m3u8")
+            ]
+            
+            try:
+                self.proc = subprocess.Popen(
+                    cmd,
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    bufsize=1048576
+                )
+                self.proc_start_time = time.time()
+                return True
+            except Exception:
+                self.proc = None
+                return False
     
     def _clean_old_ts_files(self):
         try:
